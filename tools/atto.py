@@ -16,7 +16,9 @@ BACKENDS = {
 }
 
 
-def inventory(which: Callable[[str], str | None] = shutil.which) -> dict:
+def inventory(which: Callable[[str], str | None] | None = None) -> dict:
+    # Resolve at call time so isolated tests and callers can inject the lookup.
+    which = shutil.which if which is None else which
     result = {}
     for backend, tools in sorted(BACKENDS.items()):
         detected = {tool: bool(which(tool)) for tool in tools}
