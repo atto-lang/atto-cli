@@ -202,8 +202,8 @@ mod tests {
 
     fn parse(flags: &[&str]) -> Result<RunConfig, String> {
         let mut args = vec![
-            "/tmp/app.wasm".to_string(),
-            "--runner=/tmp/run-guest.mjs".to_string(),
+            std::env::temp_dir().join("app.wasm").to_string_lossy().into_owned(),
+            format!("--runner={}",std::env::temp_dir().join("run-guest.mjs").display()),
             format!("--sha256={}", "a".repeat(64)),
         ];
         args.extend(flags.iter().map(|s| (*s).to_owned()));
@@ -217,7 +217,7 @@ mod tests {
             let config = parse(&[flag]).unwrap();
             assert_eq!(config.thread_policy, ThreadPolicy::SingleThreaded);
             let args = config.node_args();
-            assert_eq!(args.last().unwrap(), "--single-threaded");
+            assert_eq!(args.last().unwrap().to_str(), Some("--single-threaded"));
         }
         assert_eq!(parse(&[
             "--single-threaded", "--max-threads-per-space=1", "--mode=single-threaded"
@@ -228,7 +228,7 @@ mod tests {
     fn default_mode_is_not_falsely_claimed_single() {
         let config = parse(&[]).unwrap();
         assert_eq!(config.thread_policy, ThreadPolicy::Default);
-        assert!(!config.node_args().iter().any(|s| s == "--single-threaded"));
+        assert!(!config.node_args().iter().any(|s| s.to_str() == Some("--single-threaded")));
     }
 
     #[test]
@@ -261,8 +261,10 @@ mod tests {
         let source = vec!["--single-threaded".to_owned(), "app.atto".to_owned()];
         assert!(parse_run_args(&source).unwrap_err()
             .contains("E_SOURCE_RUNTIME_UNSUPPORTED"));
-        let no_pin = vec!["/tmp/app.wasm".to_owned(),
-                          "--runner=/tmp/run-guest.mjs".to_owned()];
+        let no_pin = vec![
+            std::env::temp_dir().join("app.wasm").to_string_lossy().into_owned(),
+            format!("--runner={}", std::env::temp_dir().join("run-guest.mjs").display())
+        ];
         assert!(parse_run_args(&no_pin).unwrap_err().contains("E_SHA256_REQUIRED"));
         assert!(parse(&["--", "--debug"]).is_err());
         assert!(parse(&["/tmp/second.wasm"]).is_err());
@@ -273,7 +275,7 @@ mod tests {
         let config = parse(&["--timeout-ms=2500", "--single-threaded"]).unwrap();
         let args = config.node_args();
         assert_eq!(args.len(), 5);
-        assert_eq!(args[3], "--timeout-ms=2500");
-        assert_eq!(args[4], "--single-threaded");
+        assert_eq!(args[3].to_str(), Some("--timeout-ms=2500"));
+        assert_eq!(args[4].to_str(), Some("--single-threaded"));
     }
 }
