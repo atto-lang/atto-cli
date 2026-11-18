@@ -184,8 +184,31 @@ impl RunConfig {
 /// Runs only the explicitly selected trusted host script and pinned guest.
 /// The host itself enforces private Wasm memory and verifies SHA-256.
 pub fn execute_run(config: &RunConfig) -> Result<i32, String> {
-    if !config.wasm_runner.is_file() {
-        return Err(error("E_RUNNER_UNAVAILABLE", "trusted runner script not found"));
+    // Public library callers can construct RunConfig directly without using
+    // parse_run_args. The execution boundary must validate it independently.
+    if !config.wasm.is_absolute()
+        || config.wasm.extension() != Some(OsStr::new("wasm"))
+    {
+        return Err(error("E_ABSOLUTE_PATH_REQUIRED", "invalid absolute .wasm path"));
+    }
+    if !config.wasm_runner.is_absolute() {
+        return Err(error("E_ABSOLUTE_PATH_REQUIRED", "invalid absolute runner path"));
+    }
+    if config.expected_sha256.len() != 64
+        || !config.expected_sha256.bytes().all(|b|
+            b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return Err(error("E_INVALID_SHA256", "invalid guest artifact hash"));
+    }
+    if config.timeout_ms.is_some_and(|v| !(1..=30_000).contains(&v)) {
+        return Err(error("E_INVALID_TIMEOUT", "invalid guest execution deadline"));
+    }
+    // No follow-on executable permissions for a symlink or special file.
+    // Node's guest Wasm input uses its own no-follow, single-fd snapshot gate.
+    let metadata = std::fs::symlink_metadata(&config.wasm_runner)
+        .map_err(|_| error("E_RUNNER_UNAVAILABLE", "trusted runner script not found"))?;
+    if !metadata.file_type().is_file() {
+        return Err(error("E_RUNNER_UNAVAILABLE", "runner must be a regular file"));
     }
     let mut cmd = Command::new("node");
     cmd.args(config.node_args());
@@ -194,6 +217,14 @@ pub fn execute_run(config: &RunConfig) -> Result<i32, String> {
     cmd.env_clear();
     if let Some(path) = std::env::var_os("PATH") {
         cmd.env("PATH", path);
+    }
+    // Windows needs these OS runtime variables to launch Node correctly;
+    // do not inherit arbitrary environment variables or NODE_OPTIONS.
+    #[cfg(windows)]
+    for key in ["SystemRoot", "WINDIR", "TEMP", "TMP"] {
+        if let Some(value) = std::env::var_os(key) {
+            cmd.env(key, value);
+        }
     }
     let result = cmd.status().map_err(|e| error(
         "E_HOST_RUNTIME_UNAVAILABLE", &format!("cannot execute Node: {e}")))?;
@@ -274,6 +305,19 @@ mod tests {
         assert!(parse_run_args(&no_pin).unwrap_err().contains("E_SHA256_REQUIRED"));
         assert!(parse(&["--", "--debug"]).is_err());
         assert!(parse(&["/tmp/second.wasm"]).is_err());
+    }
+
+    #[test]
+    fn forged_library_config_is_refused_at_execution_boundary() {
+        let mut config = parse(&[]).unwrap();
+        config.expected_sha256 = "not-a-digest".to_owned();
+        assert!(execute_run(&config).unwrap_err().contains("E_INVALID_SHA256"));
+        config.expected_sha256 = "a".repeat(64);
+        config.wasm = PathBuf::from("relative.wasm");
+        assert!(execute_run(&config).unwrap_err().contains("E_ABSOLUTE_PATH_REQUIRED"));
+        config.wasm = std::env::temp_dir().join("app.wasm");
+        config.timeout_ms = Some(30_001);
+        assert!(execute_run(&config).unwrap_err().contains("E_INVALID_TIMEOUT"));
     }
 
     #[test]
