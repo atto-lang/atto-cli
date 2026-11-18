@@ -55,7 +55,11 @@ pub fn parse_run_args(args: &[String]) -> Result<RunConfig, String> {
             }
             let value: u64 = raw.parse().map_err(|_| error(
                 "E_INVALID_THREAD_LIMIT", "thread limit overflows u64"))?;
-            if numeric.is_some() {
+            if let Some(previous) = numeric {
+                if previous != value {
+                    return Err(error("E_CONFLICTING_THREAD_POLICY",
+                        "conflicting numeric thread limits"));
+                }
                 return Err(error("E_DUPLICATE_THREAD_FLAG",
                     "thread limit repeated"));
             }
@@ -250,6 +254,8 @@ mod tests {
         assert!(parse(&["--single-threaded", "--max-threads-per-space=2"])
             .unwrap_err().contains("E_CONFLICTING_THREAD_POLICY"));
         assert!(parse(&["--single-threaded", "--single-threaded"]).is_err());
+        assert!(parse(&["--max-threads-per-space=1", "--max-threads-per-space=2"])
+            .unwrap_err().contains("E_CONFLICTING_THREAD_POLICY"));
         assert!(parse(&["--mode=single-threaded,")
             .unwrap_err().contains("E_EMPTY_MODE"));
         assert!(parse(&["--mode=single-threaded", "--mode=single-threaded"])
