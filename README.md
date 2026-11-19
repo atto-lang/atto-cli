@@ -49,3 +49,39 @@ AttoLang is the canonical project name; new source, examples and documentation u
 Run `python tools/atto.py doctor` to inspect tool availability on PATH, or `python tools/atto.py doctor --json --require rust --require wasm` to require a selected backend's tools. Missing required tools return exit code 2; output uses schema version 1 and does not expose executable paths. The command never runs detected binaries, invokes a compiler, or makes a runtime/parity claim. Build, run, test, and permission management remain unimplemented here.
 
 Use `python -m unittest discover -s tests -v` for this preview's deterministic host-only tests.
+
+
+## Rust `atto run` (initial executable Wasm host route)
+
+This new, std-only Rust CLI is **limited to precompiled, SHA-256-pinned,
+scalar core-Wasm guests**. It does NOT yet compile or run `.atto` source
+and it is not a general Java/LLVM/.NET/Forge scheduler.
+
+```sh
+cargo run -- run --single-threaded \
+  --backend=wasm \
+  --runner=/absolute/path/to/atto-source.wasm/scripts/run-guest.mjs \
+  --sha256=<64-lowercase-hex-digits> /absolute/path/to/program.wasm
+
+# Equivalent spelling:
+cargo run -- run --mode=single-threaded \
+  --runner=/absolute/path/to/run-guest.mjs \
+  --sha256=<sha256> /absolute/path/to/program.wasm
+```
+
+The Rust frontend validates `--single-threaded`,
+`--max-threads-per-space=1`, and `--mode=single-threaded` before execution.
+It refuses malformed/unsupported/duplicate flags, unpinned or relative
+artifacts, and other backends. It launches an explicitly selected trusted Node
+runner with an argument vector (no shell) and a minimized environment.
+That runner must be the version from companion
+[atto-source.wasm PR #23](https://github.com/atto-lang/atto-source.wasm/pull/23):
+it enforces one Worker per guest, import-free private Wasm memory, and
+returns a verified admission receipt. Other guest runtimes, guest-level
+actor schedulers, source compiler integration and native single-threaded
+execution remain unsupported. The preexisting Python doctor is a separate
+bootstrap preview, not this Rust `atto run` entrypoint.
+
+Run `cargo test --offline --all-targets` for **source-free** Rust CLI unit
+tests. Cross-repo guest execution requires both repositories and an approved
+runtime artifact; a passing CLI test is not backend conformance.
