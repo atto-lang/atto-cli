@@ -73,14 +73,13 @@ impl PermissionRequest {
             }
         }
         for kind in Kind::ALL {
-            for (prefix, map) in [
-                ("ATTO_ALLOW_", &mut out.allows),
-                ("ATTO_DENY_", &mut out.denies),
-            ] {
-                let key = format!("{prefix}{}", kind.key());
-                if let Some(raw) = flags.get(&key) {
-                    map.insert(kind, parse_scope(kind, raw)?);
-                }
+            let allow_key = format!("ATTO_ALLOW_{}", kind.key());
+            if let Some(raw) = flags.get(&allow_key) {
+                out.allows.insert(kind, parse_scope(kind, raw)?);
+            }
+            let deny_key = format!("ATTO_DENY_{}", kind.key());
+            if let Some(raw) = flags.get(&deny_key) {
+                out.denies.insert(kind, parse_scope(kind, raw)?);
             }
         }
         Ok(out)
@@ -125,9 +124,11 @@ fn parse_scope(kind: Kind, raw: &str) -> Result<Scope, String> {
 fn canonical_path(raw: &str) -> Result<String, String> {
     // Lexical preflight only: final path identity MUST be checked by a
     // descriptor-relative, tenant-root-locked host FS broker.
+    let parts = raw.strip_prefix('/').unwrap_or(raw);
     if raw.len() > 4096 || raw.starts_with('~') || raw.contains('\\')
         || raw.contains(':') || raw.starts_with("//") || raw.ends_with('/')
-        || raw.split('/').any(|part| part == ".." || part.is_empty())
+        || parts.split('/').any(|part| part == ".." || part.is_empty())
+        || parts.split('/').skip(1).any(|part| part == ".")
     {
         return Err(invalid("ambiguous or traversing path"));
     }
@@ -194,7 +195,8 @@ fn canonical_net(raw: &str) -> Result<String, String> {
     let suffix = port_part.map(port).transpose()?.map_or_else(String::new, |n| format!(":{n}"));
     let wildcard = host.starts_with("*.");
     let host = host.strip_prefix("*.").unwrap_or(host);
-    let canonical = host.trim_end_matches('.').to_ascii_lowercase();
+    if host.ends_with("..") { return Err(invalid("ambiguous DNS final dots")); }
+    let canonical = host.strip_suffix('.').unwrap_or(host).to_ascii_lowercase();
     if canonical.is_empty() || canonical.len() > 253
         || (wildcard && !canonical.contains('.'))
     {
@@ -251,6 +253,14 @@ mod tests {
           "example.com,"] {
           assert!(parse_scope(Kind::Net, invalid_net).is_err(), "{invalid_net}");
         }
+    }
+    #[test]
+    fn absolute_paths_remain_explicit_requests_without_authority() {
+        assert_eq!(canonical_path("/tmp/output").unwrap(), "/tmp/output");
+        assert!(canonical_path("/").is_err());
+        assert!(canonical_path("/tmp//output").is_err());
+        assert!(canonical_path("foo/./bar").is_err());
+        assert!(canonical_net("EXAMPLE.COM..").is_err());
     }
     #[test]
     fn bad_scopes_are_rejected_not_ignored() {
