@@ -158,7 +158,7 @@ mod tests {
     #[test]
     fn grant_request_is_rejected_even_with_pinned_guest() {
         for option in ["--allow-read=./data", "--allow-net=example.com",
-                       "--allow-all", "--allow-ffi", "--allow-env=SECRET"] {
+                       "--allow-all", "--allow-ffi=*", "--allow-env=SECRET"] {
             let mut args = pin(); args.insert(1, option.to_owned());
             let err = parse_cli_args(&args).unwrap_err();
             assert!(err.contains("E_HOST_PERMISSIONS_UNSUPPORTED"), "{option}: {err}");
@@ -170,6 +170,12 @@ mod tests {
         args.insert(1, "--deny-net=*".to_owned());
         let parsed = parse_cli_args(&args).unwrap();
         assert_eq!(parsed.thread_policy, ThreadPolicy::Default);
+    }
+    #[test]
+    fn bare_string_permission_flags_fail_closed_until_flags2env_supports_them() {
+        let mut args = pin();
+        args.insert(1, "--allow-read".to_owned());
+        assert!(parse_cli_args(&args).is_err());
     }
     #[test]
     fn duplicate_scoped_grants_never_last_wins() {
