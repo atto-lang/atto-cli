@@ -311,6 +311,7 @@ mod tests {
         forged.allows.insert(Kind::Read,
             Scope::Some(BTreeSet::from(["../outside".to_owned()])));
         assert!(canonical_argv_request_v1(&forged).is_err());
+        forged.allows.remove(&Kind::Read);
         forged.allows.insert(Kind::Net,
             Scope::Some(BTreeSet::from(["EXAMPLE.COM:443".to_owned()])));
         assert!(canonical_argv_request_v1(&forged).is_err());
