@@ -5,6 +5,7 @@ on:
       - Cargo.toml
       - .cli-flags.toml
       - src/**
+      - tests/**
       - .github/workflows/rust-cli.yml
   push:
     branches: [main]
@@ -12,6 +13,7 @@ on:
       - Cargo.toml
       - .cli-flags.toml
       - src/**
+      - tests/**
       - .github/workflows/rust-cli.yml
 permissions:
   contents: read
