@@ -75,94 +75,78 @@ type = "bool"
 env = "ATTO_ALLOW_READ"
 aliases = ["allow-read"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_read]
 env = "ATTO_DENY_READ"
 aliases = ["deny-read"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_write]
 env = "ATTO_ALLOW_WRITE"
 aliases = ["allow-write"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_write]
 env = "ATTO_DENY_WRITE"
 aliases = ["deny-write"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_net]
 env = "ATTO_ALLOW_NET"
 aliases = ["allow-net"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_net]
 env = "ATTO_DENY_NET"
 aliases = ["deny-net"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_env]
 env = "ATTO_ALLOW_ENV"
 aliases = ["allow-env"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_env]
 env = "ATTO_DENY_ENV"
 aliases = ["deny-env"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_run]
 env = "ATTO_ALLOW_RUN"
 aliases = ["allow-run"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_run]
 env = "ATTO_DENY_RUN"
 aliases = ["deny-run"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_sys]
 env = "ATTO_ALLOW_SYS"
 aliases = ["allow-sys"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_sys]
 env = "ATTO_DENY_SYS"
 aliases = ["deny-sys"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_ffi]
 env = "ATTO_ALLOW_FFI"
 aliases = ["allow-ffi"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_ffi]
 env = "ATTO_DENY_FFI"
 aliases = ["deny-ffi"]
 type = "string"
-bare_value = "*"
 
 [flags.allow_import]
 env = "ATTO_ALLOW_IMPORT"
 aliases = ["allow-import"]
 type = "string"
-bare_value = "*"
 
 [flags.deny_import]
 env = "ATTO_DENY_IMPORT"
 aliases = ["deny-import"]
 type = "string"
-bare_value = "*"
