@@ -289,8 +289,8 @@ mod tests {
         let encoded = canonical_argv_request_v1(&requested).unwrap();
         assert_ne!(encoded, bytes);
         assert!(encoded.windows(b"data/secrets".len())
-            .any(|item| item == b"data/secrets"));
-        assert!(encoded.windows(b"data".len()).any(|item| item == b"data"));
+            .any(|item| item == b"data/secrets".as_slice()));
+        assert!(encoded.windows(b"data".len()).any(|item| item == b"data".as_slice()));
     }
 
     #[test]
