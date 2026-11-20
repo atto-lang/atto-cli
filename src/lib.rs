@@ -152,11 +152,11 @@ mod tests {
             .unwrap_err().contains("E_CONFLICTING_THREAD_POLICY"));
         assert!(parse(&["--single-threaded", "--single-threaded"]).is_err());
         assert!(parse(&["--max-threads-per-space=1", "--max-threads-per-space=2"])
-            .unwrap_err().contains("E_CONFLICTING_THREAD_POLICY"));
+            .unwrap_err().contains("E_DUPLICATE_FLAG"));
         assert!(parse(&["--mode=single-threaded,")
             .unwrap_err().contains("E_EMPTY_MODE"));
         assert!(parse(&["--mode=single-threaded", "--mode=single-threaded"])
-            .unwrap_err().contains("E_DUPLICATE_MODE"));
+            .unwrap_err().contains("E_DUPLICATE_FLAG"));
     }
 
     #[test]
