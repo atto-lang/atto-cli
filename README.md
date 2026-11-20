@@ -79,3 +79,36 @@ bootstrap preview, not this Rust `atto run` entrypoint.
 Run `cargo test --offline --all-targets` for **source-free** Rust CLI unit
 tests. Cross-repo guest execution requires both repositories and an approved
 runtime artifact; a passing CLI test is not backend conformance.
+
+
+## Deno-style permission parsing (stacked draft; NOT guest I/O enforcement)
+
+This branch is stacked on the existing Rust scalar-Wasm launcher PR #4. The
+public Rust `atto run` argv parser is migrated to **one pinned bundled
+`flags2env`** authority, with `.cli-flags.toml` as its option schema.
+`provided_flags` contains operator argv overrides; ambient environment and
+`.env` data do **not** create permission grants. Malformed scopes, ambiguous
+network endpoints, duplicate/conflicting flags, and invalid UTF-8 argv must
+reject. The source tree intentionally retains the old independent Python
+`doctor` preview pending a separate Rust migration: that Python command is
+**not** the new runtime CLI and cannot grant guest authority.
+
+Supported permission request forms are `--allow/deny-{read,write,net,env,run,sys,ffi,import}[=scope]`,
+`--allow-all`, `--no-prompt`, and `--permission-check=runtime|compile`.
+The branch does **not** introduce a security sandbox, trusted manifest signer,
+filesystem/network host broker, source `.atto` compilation, or general
+cross-backend guest execution.
+
+**Current scalar Wasm support is import-free.** Passing any privileged allow
+request, even `--allow-net` or `--allow-read=./data`, must return
+`E_HOST_PERMISSIONS_UNSUPPORTED` and never silently become a no-op or
+unrestricted host capability. Explicit deny-only flags can be accepted for
+this no-host-import profile, but they are not evidence of OS sandboxing.
+This remains a draft pending real Rust test execution, reviewed dependency
+locking, and the runtime host-broker work in atto-cli #6 / conformance #107.
+Do not infer that `atto run --allow-read=./data main.atto` works yet.
+
+The dependency is pinned to the public `flags-2-env/flags-2-env` commit
+`278245253ee5d37b1fb54285383ab18818de6b18`. A release must additionally
+commit/audit a complete `Cargo.lock` and establish a trusted install-time
+schema path instead of relying on `CARGO_MANIFEST_DIR`.
