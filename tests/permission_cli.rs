@@ -3,9 +3,11 @@ use std::process::{Command, Output};
 
 fn run(extra: &[&str], env_grant: Option<(&str, &str)>) -> Output {
     let mut command = Command::new(env!("CARGO_BIN_EXE_atto"));
-    command.args(["run", "--backend=wasm", "--runner=/tmp/atto-trusted-runner.mjs",
-                  "--sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                  "/tmp/atto-nonexistent-guest.wasm"]);
+    let root = std::env::temp_dir();
+    command.args(["run", "--backend=wasm"]);
+    command.arg(format!("--runner={}", root.join("atto-trusted-runner.mjs").display()));
+    command.arg("--sha256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+    command.arg(root.join("atto-nonexistent-guest.wasm"));
     command.args(extra);
     // The linked subprocess must not derive permission authority from ambient
     // ATTO_ALLOW_ALL, or from the package's .cli-flags.toml default map.
