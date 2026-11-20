@@ -93,8 +93,16 @@ reject. The source tree intentionally retains the old independent Python
 `doctor` preview pending a separate Rust migration: that Python command is
 **not** the new runtime CLI and cannot grant guest authority.
 
-Supported permission request forms are `--allow/deny-{read,write,net,env,run,sys,ffi,import}[=scope]`,
-`--allow-all`, `--no-prompt`, and `--permission-check=runtime|compile`.
+The currently pinned flags2env parser **does not support the proposed
+optional bare-value string scopes**. Until its canonical schema explicitly
+supports that feature, this draft accepts only the inline
+`--allow/deny-{read,write,net,env,run,sys,ffi,import}=scope` form.
+A bare `--allow-read`, for example, must fail closed rather than silently
+become a grant. The normative proposal at atto-spec #122 permits bare
+category flags, so this is a documented **pending syntax-parity gap**,
+not a change to the target specification.
+`--allow-all`, `--no-prompt`, and
+`--permission-check=runtime|compile` remain separate declarations.
 The branch does **not** introduce a security sandbox, trusted manifest signer,
 filesystem/network host broker, source `.atto` compilation, or general
 cross-backend guest execution.
