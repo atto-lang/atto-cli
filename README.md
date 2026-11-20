@@ -120,3 +120,26 @@ The dependency is pinned to the public `flags-2-env/flags-2-env` commit
 `278245253ee5d37b1fb54285383ab18818de6b18`. A release must additionally
 commit/audit a complete `Cargo.lock` and establish a trusted install-time
 schema path instead of relying on `CARGO_MANIFEST_DIR`.
+
+
+### Candidate canonical operator request (NOT an artifact manifest)
+
+`src/permissions.rs` now exposes `canonical_argv_request_v1`. The
+versioned encoding includes an explicit deny-all marker, a fixed order
+of eight resource kinds and deterministic scoped allow/deny entries.
+Manually constructed noncanonical scopes are rejected at the encoding
+boundary. The canonical request is built from **explicit argv only**.
+
+**It is not signed, not authenticated, not an executable's independently
+verified permission ceiling, and not connected to an actual privileged
+host-I/O runtime.** No guest/backend may treat these bytes as a grant.
+A future trusted loader must validate an independently signed artifact,
+bind its actual SHA, intersect the operator request with host/TenantVM/
+actor/delegation ceilings and enforce every I/O admission through a
+trusted broker. The current import-free Wasm profile continues to reject
+all privileged allow requests.
+
+The `flags-2-env` parser revision does not recognize the proposed
+`bare_value` schema key. The initial draft had that key; it has been
+removed after auditing the upstream C parser source. A bare string scope
+flag must fail closed until the canonical parser is extended and tested.
