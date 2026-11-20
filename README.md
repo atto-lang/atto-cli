@@ -79,3 +79,67 @@ bootstrap preview, not this Rust `atto run` entrypoint.
 Run `cargo test --offline --all-targets` for **source-free** Rust CLI unit
 tests. Cross-repo guest execution requires both repositories and an approved
 runtime artifact; a passing CLI test is not backend conformance.
+
+
+## Deno-style permission parsing (stacked draft; NOT guest I/O enforcement)
+
+This branch is stacked on the existing Rust scalar-Wasm launcher PR #4. The
+public Rust `atto run` argv parser is migrated to **one pinned bundled
+`flags2env`** authority, with `.cli-flags.toml` as its option schema.
+`provided_flags` contains operator argv overrides; ambient environment and
+`.env` data do **not** create permission grants. Malformed scopes, ambiguous
+network endpoints, duplicate/conflicting flags, and invalid UTF-8 argv must
+reject. The source tree intentionally retains the old independent Python
+`doctor` preview pending a separate Rust migration: that Python command is
+**not** the new runtime CLI and cannot grant guest authority.
+
+The currently pinned flags2env parser **does not support the proposed
+optional bare-value string scopes**. Until its canonical schema explicitly
+supports that feature, this draft accepts only the inline
+`--allow/deny-{read,write,net,env,run,sys,ffi,import}=scope` form.
+A bare `--allow-read`, for example, must fail closed rather than silently
+become a grant. The normative proposal at atto-spec #122 permits bare
+category flags, so this is a documented **pending syntax-parity gap**,
+not a change to the target specification.
+`--allow-all`, `--no-prompt`, and
+`--permission-check=runtime|compile` remain separate declarations.
+The branch does **not** introduce a security sandbox, trusted manifest signer,
+filesystem/network host broker, source `.atto` compilation, or general
+cross-backend guest execution.
+
+**Current scalar Wasm support is import-free.** Passing any privileged allow
+request, even `--allow-net` or `--allow-read=./data`, must return
+`E_HOST_PERMISSIONS_UNSUPPORTED` and never silently become a no-op or
+unrestricted host capability. Explicit deny-only flags can be accepted for
+this no-host-import profile, but they are not evidence of OS sandboxing.
+This remains a draft pending real Rust test execution, reviewed dependency
+locking, and the runtime host-broker work in atto-cli #6 / conformance #107.
+Do not infer that `atto run --allow-read=./data main.atto` works yet.
+
+The dependency is pinned to the public `flags-2-env/flags-2-env` commit
+`278245253ee5d37b1fb54285383ab18818de6b18`. A release must additionally
+commit/audit a complete `Cargo.lock` and establish a trusted install-time
+schema path instead of relying on `CARGO_MANIFEST_DIR`.
+
+
+### Candidate canonical operator request (NOT an artifact manifest)
+
+`src/permissions.rs` now exposes `canonical_argv_request_v1`. The
+versioned encoding includes an explicit deny-all marker, a fixed order
+of eight resource kinds and deterministic scoped allow/deny entries.
+Manually constructed noncanonical scopes are rejected at the encoding
+boundary. The canonical request is built from **explicit argv only**.
+
+**It is not signed, not authenticated, not an executable's independently
+verified permission ceiling, and not connected to an actual privileged
+host-I/O runtime.** No guest/backend may treat these bytes as a grant.
+A future trusted loader must validate an independently signed artifact,
+bind its actual SHA, intersect the operator request with host/TenantVM/
+actor/delegation ceilings and enforce every I/O admission through a
+trusted broker. The current import-free Wasm profile continues to reject
+all privileged allow requests.
+
+The `flags-2-env` parser revision does not recognize the proposed
+`bare_value` schema key. The initial draft had that key; it has been
+removed after auditing the upstream C parser source. A bare string scope
+flag must fail closed until the canonical parser is extended and tested.

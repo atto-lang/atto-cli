@@ -1,15 +1,19 @@
-name: Rust Atto CLI single-threaded policy (source-free)
+name: Rust Atto CLI flags2env and guest admission (host-only)
 on:
   pull_request:
     paths:
       - Cargo.toml
+      - .cli-flags.toml
       - src/**
+      - tests/**
       - .github/workflows/rust-cli.yml
   push:
     branches: [main]
     paths:
       - Cargo.toml
+      - .cli-flags.toml
       - src/**
+      - tests/**
       - .github/workflows/rust-cli.yml
 permissions:
   contents: read
@@ -34,5 +38,12 @@ jobs:
           test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
           git rev-parse HEAD
           git rev-parse HEAD^{tree}
-      - name: Test Rust policy and host invocation (not guest execution)
-        run: cargo test --offline --all-targets
+      - name: Test pinned flags2env CLI and policy requests (NOT guest execution)
+        run: |
+          cargo test --all-targets
+          cargo test --all-targets permissions
+      - name: State guest-security evidence limit
+        shell: bash
+        run: |
+          echo "HOST_ONLY: no compiled Atto source, filesystem broker, or tenant isolation demonstrated."
+          echo "Do NOT mark host FS/network permissions implemented from this workflow."

@@ -1,0 +1,152 @@
+# Canonical Atto CLI parser schema. `flags2env` is the only option parser.
+# SECURITY: runtime authority is derived ONLY from parsed.provided_flags
+# (argv provenance), never the parser's ambient/default-resolved map.
+[identity]
+service = "atto"
+type_name = "AttoCliFlags"
+
+[parse]
+require_equals = true
+allow_unknown = false
+
+[env]
+load = false
+files = []
+
+[commands.run]
+[commands.build]
+[commands.check]
+[commands.test]
+[commands.lsp]
+[commands.doctor]
+[commands.version]
+
+[flags.backend]
+env = "ATTO_BACKEND"
+aliases = ["backend"]
+type = "string"
+
+[flags.runner]
+env = "ATTO_RUNNER"
+aliases = ["runner"]
+type = "string"
+
+[flags.sha256]
+env = "ATTO_SHA256"
+aliases = ["sha256"]
+type = "string"
+
+[flags.timeout_ms]
+env = "ATTO_TIMEOUT_MS"
+aliases = ["timeout-ms"]
+type = "string"
+
+[flags.single_threaded]
+env = "ATTO_SINGLE_THREADED"
+aliases = ["single-threaded"]
+type = "bool"
+
+[flags.max_threads_per_space]
+env = "ATTO_MAX_THREADS_PER_SPACE"
+aliases = ["max-threads-per-space"]
+type = "string"
+
+[flags.mode]
+env = "ATTO_MODE"
+aliases = ["mode"]
+type = "string"
+
+[flags.permission_check]
+env = "ATTO_PERMISSION_CHECK"
+aliases = ["permission-check"]
+type = "string"
+
+[flags.allow_all]
+env = "ATTO_ALLOW_ALL"
+aliases = ["allow-all"]
+type = "bool"
+
+[flags.no_prompt]
+env = "ATTO_NO_PROMPT"
+aliases = ["no-prompt"]
+type = "bool"
+
+[flags.allow_read]
+env = "ATTO_ALLOW_READ"
+aliases = ["allow-read"]
+type = "string"
+
+[flags.deny_read]
+env = "ATTO_DENY_READ"
+aliases = ["deny-read"]
+type = "string"
+
+[flags.allow_write]
+env = "ATTO_ALLOW_WRITE"
+aliases = ["allow-write"]
+type = "string"
+
+[flags.deny_write]
+env = "ATTO_DENY_WRITE"
+aliases = ["deny-write"]
+type = "string"
+
+[flags.allow_net]
+env = "ATTO_ALLOW_NET"
+aliases = ["allow-net"]
+type = "string"
+
+[flags.deny_net]
+env = "ATTO_DENY_NET"
+aliases = ["deny-net"]
+type = "string"
+
+[flags.allow_env]
+env = "ATTO_ALLOW_ENV"
+aliases = ["allow-env"]
+type = "string"
+
+[flags.deny_env]
+env = "ATTO_DENY_ENV"
+aliases = ["deny-env"]
+type = "string"
+
+[flags.allow_run]
+env = "ATTO_ALLOW_RUN"
+aliases = ["allow-run"]
+type = "string"
+
+[flags.deny_run]
+env = "ATTO_DENY_RUN"
+aliases = ["deny-run"]
+type = "string"
+
+[flags.allow_sys]
+env = "ATTO_ALLOW_SYS"
+aliases = ["allow-sys"]
+type = "string"
+
+[flags.deny_sys]
+env = "ATTO_DENY_SYS"
+aliases = ["deny-sys"]
+type = "string"
+
+[flags.allow_ffi]
+env = "ATTO_ALLOW_FFI"
+aliases = ["allow-ffi"]
+type = "string"
+
+[flags.deny_ffi]
+env = "ATTO_DENY_FFI"
+aliases = ["deny-ffi"]
+type = "string"
+
+[flags.allow_import]
+env = "ATTO_ALLOW_IMPORT"
+aliases = ["allow-import"]
+type = "string"
+
+[flags.deny_import]
+env = "ATTO_DENY_IMPORT"
+aliases = ["deny-import"]
+type = "string"

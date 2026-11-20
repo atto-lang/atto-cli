@@ -12,3 +12,7 @@ path = "src/main.rs"
 [lib]
 name = "atto_cli"
 path = "src/lib.rs"
+
+[dependencies]
+# Bundled C parser, immutable public-source commit. Never use dynamic lib loading.
+flags2env = { git = "https://github.com/flags-2-env/flags-2-env.git", rev = "278245253ee5d37b1fb54285383ab18818de6b18" }
