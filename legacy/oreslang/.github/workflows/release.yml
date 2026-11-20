@@ -1,0 +1,283 @@
+name: Release binaries
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            archive: oreslang-linux-x86_64.tar.gz
+            binary: oreslang
+          - os: macos-15-intel
+            target: x86_64-apple-darwin
+            archive: oreslang-macos-x86_64.tar.gz
+            binary: oreslang
+          - os: macos-15
+            target: aarch64-apple-darwin
+            archive: oreslang-macos-aarch64.tar.gz
+            binary: oreslang
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            archive: oreslang-windows-x86_64.zip
+            binary: oreslang.exe
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # pinned v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@686976e191b89faba57d3206551f0f330d8cb249 # pinned
+        with:
+          toolchain: 1.78.0
+          targets: ${{ matrix.target }}
+
+      - name: Test workspace
+        run: cargo test --workspace --locked
+
+      - name: Build release binary
+        run: cargo build --release --locked --bins --target ${{ matrix.target }}
+
+      - name: Package Unix binary
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "target/${{ matrix.target }}/release/${{ matrix.binary }}" dist/
+          cp "target/${{ matrix.target }}/release/atto" dist/
+          tar -C dist -czf "${{ matrix.archive }}" "${{ matrix.binary }}" atto
+
+      - name: Package Windows binary
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "target/${{ matrix.target }}/release/${{ matrix.binary }}" "dist/${{ matrix.binary }}"
+          Copy-Item "target/${{ matrix.target }}/release/atto.exe" "dist/atto.exe"
+          Compress-Archive -Path "dist/*.exe" -DestinationPath "${{ matrix.archive }}"
+
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4 # pinned v4
+        with:
+          name: ${{ matrix.archive }}
+          path: ${{ matrix.archive }}
+
+  publish:
+    # Serialize same-tag publications; a second attempt must never cancel the first.
+    concurrency:
+      group: attolang-cli-release-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: write
+    steps:
+      - name: Publish immutable release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_REF_TYPE" != "tag" ]; then
+            echo "release publication requires a tag ref" >&2
+            exit 1
+          fi
+          protected="$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq '.protected')"
+          if [ "$protected" != "true" ]; then
+            echo "release publication requires protected main" >&2
+            exit 1
+          fi
+          ancestry="$(gh api "repos/$GITHUB_REPOSITORY/compare/$GITHUB_SHA...main" --jq '.status')"
+          case "$ancestry" in
+            ahead|identical) ;;
+            *) echo "tag commit is not an ancestor of main" >&2; exit 1 ;;
+          esac
+          verify_tag_commit() {
+            local resolved_commit
+            # GitHub's commits endpoint peels both lightweight and annotated tags.
+            resolved_commit="$(gh api "repos/$GITHUB_REPOSITORY/commits/$RELEASE_TAG" --jq '.sha')"
+            if [ "$resolved_commit" != "$GITHUB_SHA" ]; then
+              echo "release tag no longer resolves to this workflow commit" >&2
+              exit 1
+            fi
+          }
+          verify_tag_commit
+          mkdir -p dist
+          archives=(
+            oreslang-linux-x86_64.tar.gz
+            oreslang-macos-x86_64.tar.gz
+            oreslang-macos-aarch64.tar.gz
+            oreslang-windows-x86_64.zip
+          )
+          for archive in "${archives[@]}"; do
+            gh run download "$GITHUB_RUN_ID" --repo "$GITHUB_REPOSITORY" --name "$archive" --dir dist
+            test -s "dist/$archive"
+          done
+          test "$(find dist -maxdepth 1 -type f | wc -l)" -eq 4
+          python3 - "$PWD/dist" <<'PY'
+          import pathlib
+          import stat
+          import struct
+          import sys
+          import tarfile
+          import zipfile
+          import zlib
+          
+          root = pathlib.Path(sys.argv[1])
+          limit = 256 * 1024 * 1024
+          
+          def verify_binary_header(stream, archive):
+              # Validate format and target CPU, not code authenticity; source-free fixtures exercise this.
+              header = stream.read(4096)
+              if archive == "oreslang-linux-x86_64.tar.gz":
+                  valid = (
+                      len(header) >= 64 and header[:4] == b"\x7fELF"
+                      and header[4:6] == b"\x02\x01"
+                      and struct.unpack_from("<H", header, 16)[0] in (2, 3)  # ET_EXEC or PIE ET_DYN
+                      and struct.unpack_from("<H", header, 18)[0] == 62
+                  )
+              elif archive in ("oreslang-macos-x86_64.tar.gz", "oreslang-macos-aarch64.tar.gz"):
+                  cpu = 0x01000007 if archive == "oreslang-macos-x86_64.tar.gz" else 0x0100000c
+                  valid = (
+                      len(header) >= 32 and header[:4] == b"\xcf\xfa\xed\xfe"
+                      and struct.unpack_from("<I", header, 4)[0] == cpu
+                      and struct.unpack_from("<I", header, 12)[0] == 2  # MH_EXECUTE
+                  )
+              elif archive == "oreslang-windows-x86_64.zip":
+                  valid = False
+                  if len(header) >= 64 and header[:2] == b"MZ":
+                      offset = struct.unpack_from("<I", header, 0x3c)[0]
+                      valid = (
+                          64 <= offset and offset + 26 <= len(header)
+                          and header[offset:offset + 4] == b"PE\x00\x00"
+                          and struct.unpack_from("<H", header, offset + 4)[0] == 0x8664
+                          and struct.unpack_from("<H", header, offset + 20)[0] >= 0x70
+                          and (struct.unpack_from("<H", header, offset + 22)[0] & 0x0002) != 0
+                          and struct.unpack_from("<H", header, offset + 24)[0] == 0x020b  # PE32+
+                      )
+              else:
+                  raise ValueError(f"unknown release target: {archive}")
+              if not valid:
+                  raise ValueError(f"{archive}: binary header does not match release target")
+          
+          unix_archives = (
+              "oreslang-linux-x86_64.tar.gz",
+              "oreslang-macos-x86_64.tar.gz",
+              "oreslang-macos-aarch64.tar.gz",
+          )
+          # A release archive must be an ordinary artifact at its expected path,
+          # never a symlink redirecting validation or the later upload elsewhere.
+          for archive_name in (*unix_archives, "oreslang-windows-x86_64.zip"):
+              artifact = root / archive_name
+              if artifact.is_symlink() or not artifact.is_file():
+                  raise ValueError(f"{archive_name}: release archive must be a regular file")
+
+          # Consume the complete *single* gzip member before parsing TAR entries.
+          # tarfile may stop at TAR EOF without checking the gzip CRC32/ISIZE trailer.
+          # zlib's gzip wrapper validates both fields only when decoder.eof is reached.
+          def verify_gzip_envelope(artifact, archive):
+              expanded_limit = 2 * limit + 8 * 1024 * 1024
+              if artifact.stat().st_size > expanded_limit:
+                  raise ValueError(f"{archive}: compressed archive exceeds bounded size")
+              decoder = zlib.decompressobj(31)
+              expanded = 0
+              with artifact.open("rb") as raw:
+                  while True:
+                      compressed = raw.read(64 * 1024)
+                      if not compressed:
+                          break
+                      pending = compressed
+                      while pending:
+                          output = decoder.decompress(
+                              pending, min(1024 * 1024, expanded_limit - expanded + 1)
+                          )
+                          expanded += len(output)
+                          if expanded > expanded_limit:
+                              raise ValueError(f"{archive}: gzip expanded-size limit exceeded")
+                          if decoder.eof:
+                              # No concatenated gzip members or trailing data, even NUL padding.
+                              if decoder.unused_data or raw.read(1):
+                                  raise ValueError(f"{archive}: trailing or concatenated gzip data")
+                              return
+                          remainder = decoder.unconsumed_tail
+                          if remainder == pending and not output:
+                              raise ValueError(f"{archive}: gzip decoder made no progress")
+                          pending = remainder
+              raise ValueError(f"{archive}: gzip stream missing a verified EOF/trailer")
+          
+          for archive in unix_archives:
+              verify_gzip_envelope(root / archive, archive)
+              with tarfile.open(root / archive, "r:gz") as tar:
+                  members = tar.getmembers()
+                  if sorted(member.name for member in members) != ["atto", "oreslang"]:
+                      raise ValueError(f"{archive}: unexpected, missing or duplicate members")
+                  for member in members:
+                      if not member.isfile() or not 0 < member.size <= limit:
+                          raise ValueError(f"{archive}: unsafe member type or size: {member.name}")
+                      if (member.mode & 0o111) != 0o111 or member.mode & 0o7000 or member.mode & 0o022:
+                          raise ValueError(f"{archive}: unsafe executable mode: {member.name}")
+                      stream = tar.extractfile(member)
+                      if stream is None:
+                          raise ValueError(f"{archive}: unreadable member: {member.name}")
+                      with stream:
+                          verify_binary_header(stream, archive)
+                          while stream.read(1024 * 1024):
+                              pass
+          
+          archive = "oreslang-windows-x86_64.zip"
+          # The release packager creates a conventional comment-free ZIP.
+          # Reject SFX prefixes and trailing payloads even though zipfile can
+          # recover those polyglot archives by searching for the directory.
+          archive_path = root / archive
+          with archive_path.open("rb") as raw:
+              raw.seek(0, 2)
+              length = raw.tell()
+              if length < 22:
+                  raise ValueError(f"{archive}: truncated ZIP envelope")
+              raw.seek(0)
+              if raw.read(4) != b"PK\x03\x04":
+                  raise ValueError(f"{archive}: leading payload before ZIP entries")
+              raw.seek(length - 22)
+              eocd = raw.read(22)
+              if eocd[:4] != b"PK\x05\x06" or eocd[-2:] != b"\x00\x00":
+                  raise ValueError(f"{archive}: ZIP trailer or comment is not canonical")
+          with zipfile.ZipFile(root / archive) as zipped:
+              members = zipped.infolist()
+              if sorted(member.filename for member in members) != ["atto.exe", "oreslang.exe"]:
+                  raise ValueError(f"{archive}: unexpected, missing or duplicate members")
+              for member in members:
+                  mode = (member.external_attr >> 16) & 0xFFFF
+                  kind = stat.S_IFMT(mode)
+                  if member.is_dir() or (member.create_system == 3 and kind not in (0, stat.S_IFREG)):
+                      raise ValueError(f"{archive}: unsafe member type: {member.filename}")
+                  if not 0 < member.file_size <= limit:
+                      raise ValueError(f"{archive}: unsafe member size: {member.filename}")
+                  with zipped.open(member) as stream:
+                      verify_binary_header(stream, archive)
+                      while stream.read(1024 * 1024):
+                          pass
+          PY
+          verify_tag_commit
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "release already exists; refusing to replace assets" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --draft --title "$RELEASE_TAG" --notes "AttoLang CLI-only binaries; no native compiler bundle."
+          for archive in "${archives[@]}"; do
+            gh release upload "$RELEASE_TAG" "dist/$archive" --repo "$GITHUB_REPOSITORY"
+          done
+          verify_tag_commit
+          # An independently approved release operator must publish this draft separately.
+          # A tag push alone is not authorization to distribute binaries.
+          echo "CLI_ONLY_DRAFT_STAGED_NOT_PUBLISHED"

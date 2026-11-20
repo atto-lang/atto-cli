@@ -1,0 +1,872 @@
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use oreslang_compiler_client::{CompilerClient, CompilerCommand};
+use oreslang_protocol::{CheckReport, Diagnostic, DiagnosticSeverity, DIAGNOSTIC_PROTOCOL_VERSION};
+use serde::Serialize;
+use std::ffi::OsString;
+use std::path::PathBuf;
+use std::process::ExitCode;
+
+#[derive(Debug, Parser)]
+#[command(
+    name = "oreslang",
+    version,
+    about = "AttoLang developer tooling and editor frontend"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Debug, Subcommand)]
+enum Command {
+    /// Parse, resolve, and type-check AttoLang without executing guest code.
+    Check(CheckArgs),
+    /// Execute an AttoLang program with explicit host-I/O permissions.
+    Run(RunArgs),
+    /// Execute native AttoLang test suites with race or fuzz orchestration.
+    Test(TestArgs),
+    /// Run the AttoLang language server.
+    Lsp(LspArgs),
+    /// Show the compiler backend that the CLI will use.
+    Doctor(DoctorArgs),
+    /// Print the AttoLang CLI version.
+    Version,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum OutputFormat {
+    Human,
+    Json,
+    Jsonl,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, ValueEnum)]
+enum PermissionCheck {
+    /// Compile/type-check normally and enforce external I/O permissions when an operation executes.
+    Runtime,
+    /// Reject statically identifiable external-I/O calls whose coarse permission is absent.
+    Compile,
+}
+
+impl PermissionCheck {
+    fn backend_value(self) -> &'static str {
+        match self {
+            Self::Runtime => "runtime",
+            Self::Compile => "compile",
+        }
+    }
+}
+
+/// Backend-neutral build-profile selectors.
+///
+/// These are first-class options so raw --compiler-arg cannot silently weaken
+/// AOT/realtime policy. Backends must fail closed when a requested profile is
+/// not yet provable.
+#[derive(Clone, Debug, Default, Args)]
+struct BuildProfileArgs {
+    /// Release build: semantic tree shaking plus runtime/metadata pruning.
+    #[arg(long, conflicts_with_all = ["strict_aot", "hard_rt"])]
+    release: bool,
+
+    /// Closed-world full AOT: release + no JIT, runtime reflection, or unresolved dynamic code.
+    #[arg(long, conflicts_with_all = ["release", "hard_rt"])]
+    strict_aot: bool,
+
+    /// Hard-real-time admission: strict AOT + no GC/unbounded allocation/waits and WCET evidence.
+    #[arg(long, conflicts_with_all = ["release", "strict_aot"])]
+    hard_rt: bool,
+
+    /// Forbid hosted stdlib roots and implicit OS/libc providers.
+    #[arg(long)]
+    freestanding: bool,
+}
+
+impl BuildProfileArgs {
+    fn backend_args(&self) -> Vec<OsString> {
+        let mut args = Vec::new();
+        if self.release {
+            args.push(OsString::from("--release"));
+        } else if self.strict_aot {
+            args.push(OsString::from("--strict-aot"));
+        } else if self.hard_rt {
+            args.push(OsString::from("--hard-rt"));
+        }
+        if self.freestanding {
+            args.push(OsString::from("--freestanding"));
+        }
+        args
+    }
+}
+
+/// Deno-style scoped permissions forwarded to the Oreslang compiler/runtime.
+///
+/// Scope-taking flags require '=' so a bare permission flag can mean "all"
+/// without consuming the following Oreslang source path.
+#[derive(Clone, Debug, Args)]
+struct PermissionArgs {
+    /// Choose runtime-only or compile-time-plus-runtime permission admission.
+    #[arg(
+        long,
+        value_enum,
+        default_value_t = PermissionCheck::Runtime
+    )]
+    permission_check: PermissionCheck,
+
+    /// Allow every Ores-owned privileged I/O category.
+    #[arg(long)]
+    allow_all: bool,
+
+    /// Allow filesystem reads; bare means all, =PATHS narrows to comma-separated roots.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    allow_read: Option<String>,
+
+    /// Deny filesystem reads; explicit denies override allows.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    deny_read: Option<String>,
+
+    /// Allow filesystem writes.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    allow_write: Option<String>,
+
+    /// Deny filesystem writes.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    deny_write: Option<String>,
+
+    /// Allow network endpoints; bare means all, =HOST[:PORT],... narrows the scope.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "HOSTS"
+    )]
+    allow_net: Option<String>,
+
+    /// Deny network endpoints.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "HOSTS"
+    )]
+    deny_net: Option<String>,
+
+    /// Allow environment-variable names.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "NAMES"
+    )]
+    allow_env: Option<String>,
+
+    /// Deny environment-variable names.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "NAMES"
+    )]
+    deny_env: Option<String>,
+
+    /// Allow child-process commands.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "COMMANDS"
+    )]
+    allow_run: Option<String>,
+
+    /// Deny child-process commands.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "COMMANDS"
+    )]
+    deny_run: Option<String>,
+
+    /// Allow system/process information keys.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "KEYS"
+    )]
+    allow_sys: Option<String>,
+
+    /// Deny system/process information keys.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "KEYS"
+    )]
+    deny_sys: Option<String>,
+
+    /// Allow native FFI library roots.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    allow_ffi: Option<String>,
+
+    /// Deny native FFI library roots.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    deny_ffi: Option<String>,
+
+    /// Allow runtime/hot-code import roots.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    allow_import: Option<String>,
+
+    /// Deny runtime/hot-code import roots.
+    #[arg(
+        long,
+        num_args = 0..=1,
+        default_missing_value = "*",
+        require_equals = true,
+        value_name = "PATHS"
+    )]
+    deny_import: Option<String>,
+
+    /// State explicitly that permission failures must never prompt.
+    #[arg(long)]
+    no_prompt: bool,
+}
+
+impl PermissionArgs {
+    fn backend_args(&self) -> Vec<OsString> {
+        let mut args = vec![OsString::from(format!(
+            "--permission-check={}",
+            self.permission_check.backend_value()
+        ))];
+
+        if self.allow_all {
+            args.push(OsString::from("--allow-all"));
+        }
+        push_scope(&mut args, "allow-read", self.allow_read.as_deref());
+        push_scope(&mut args, "deny-read", self.deny_read.as_deref());
+        push_scope(&mut args, "allow-write", self.allow_write.as_deref());
+        push_scope(&mut args, "deny-write", self.deny_write.as_deref());
+        push_scope(&mut args, "allow-net", self.allow_net.as_deref());
+        push_scope(&mut args, "deny-net", self.deny_net.as_deref());
+        push_scope(&mut args, "allow-env", self.allow_env.as_deref());
+        push_scope(&mut args, "deny-env", self.deny_env.as_deref());
+        push_scope(&mut args, "allow-run", self.allow_run.as_deref());
+        push_scope(&mut args, "deny-run", self.deny_run.as_deref());
+        push_scope(&mut args, "allow-sys", self.allow_sys.as_deref());
+        push_scope(&mut args, "deny-sys", self.deny_sys.as_deref());
+        push_scope(&mut args, "allow-ffi", self.allow_ffi.as_deref());
+        push_scope(&mut args, "deny-ffi", self.deny_ffi.as_deref());
+        push_scope(&mut args, "allow-import", self.allow_import.as_deref());
+        push_scope(&mut args, "deny-import", self.deny_import.as_deref());
+
+        if self.no_prompt {
+            args.push(OsString::from("--no-prompt"));
+        }
+        args
+    }
+}
+
+fn push_scope(args: &mut Vec<OsString>, flag: &str, value: Option<&str>) {
+    let Some(value) = value else { return };
+    if value == "*" {
+        args.push(OsString::from(format!("--{flag}")));
+    } else {
+        args.push(OsString::from(format!("--{flag}={value}")));
+    }
+}
+
+#[derive(Debug, Args)]
+struct BackendArgs {
+    /// Override the internal compiler backend executable.
+    #[arg(long, value_name = "PROGRAM")]
+    compiler: Option<OsString>,
+
+    /// Prefix argument passed to the internal compiler backend before --check.
+    #[arg(
+        long = "compiler-arg",
+        value_name = "ARG",
+        action = clap::ArgAction::Append,
+        value_parser = validate_compiler_arg
+    )]
+    compiler_args: Vec<OsString>,
+}
+
+/// Never let raw backend arguments become an alternate permission-grant
+/// channel. All host I/O authority must come from PermissionArgs. This is an
+/// argument provenance guard, not a sandbox for arbitrary backend executables.
+fn validate_compiler_arg(raw: &str) -> Result<OsString, String> {
+    let forbidden = raw == "--"
+        || raw.starts_with('@')
+        || raw == "--allow"
+        || raw.starts_with("--allow-")
+        || raw.starts_with("--allow=")
+        || raw == "--deny"
+        || raw.starts_with("--deny-")
+        || raw.starts_with("--deny=")
+        || raw == "--permission-check"
+        || raw.starts_with("--permission-check=")
+        || raw == "--no-prompt"
+        || raw.starts_with("--no-prompt=")
+        || raw == "--release"
+        || raw.starts_with("--release=")
+        || raw == "--strict-aot"
+        || raw.starts_with("--strict-aot=")
+        || raw == "--hard-rt"
+        || raw.starts_with("--hard-rt=")
+        || raw == "--freestanding"
+        || raw.starts_with("--freestanding=")
+        || raw.starts_with("--ores-");
+    if forbidden {
+        return Err("permission, isolate, and build-profile policy flags must use first-class CLI options, not --compiler-arg".into());
+    }
+    Ok(OsString::from(raw))
+}
+
+#[derive(Debug, Args)]
+struct CheckArgs {
+    /// AttoLang source files to check (.atto canonical; .ores remains compatible).
+    #[arg(required = true, value_name = "FILE")]
+    files: Vec<PathBuf>,
+
+    /// Diagnostic output format.
+    #[arg(long, value_enum, default_value_t = OutputFormat::Human)]
+    format: OutputFormat,
+
+    #[command(flatten)]
+    permissions: PermissionArgs,
+
+    #[command(flatten)]
+    profile: BuildProfileArgs,
+
+    #[command(flatten)]
+    backend: BackendArgs,
+}
+
+#[derive(Debug, Args)]
+struct RunArgs {
+    /// AttoLang source file to execute (.atto canonical; .ores remains compatible).
+    #[arg(required = true, value_name = "FILE")]
+    file: PathBuf,
+
+    #[command(flatten)]
+    permissions: PermissionArgs,
+
+    #[command(flatten)]
+    profile: BuildProfileArgs,
+
+    #[command(flatten)]
+    backend: BackendArgs,
+}
+
+/// Forward the test CLI's versioned options without duplicating its parser.
+/// Installation of oreslang-test is explicit and kept separate from the
+/// main compiler and runtime distribution.
+#[derive(Debug, Args)]
+struct TestArgs {
+    #[arg(required = true, num_args = 1.., trailing_var_arg = true, allow_hyphen_values = true)]
+    args: Vec<OsString>,
+}
+
+#[derive(Debug, Args)]
+struct LspArgs {
+    /// Serve Language Server Protocol messages over stdin/stdout.
+    #[arg(long)]
+    stdio: bool,
+
+    #[command(flatten)]
+    permissions: PermissionArgs,
+
+    #[command(flatten)]
+    backend: BackendArgs,
+}
+
+#[derive(Debug, Args)]
+struct DoctorArgs {
+    #[command(flatten)]
+    backend: BackendArgs,
+}
+
+#[derive(Serialize)]
+struct JsonLineDiagnostic<'a> {
+    version: u32,
+    diagnostic: &'a Diagnostic,
+}
+
+// One parser for both binary names. Only the help/usage display name changes;
+// the compiler transport, permissions and diagnostic protocol are shared.
+fn parse_cli() -> Cli {
+    use clap::{CommandFactory, FromArgMatches};
+    use std::ffi::OsStr;
+
+    let is_atto = std::env::args_os()
+        .next()
+        .and_then(|name| {
+            std::path::Path::new(&name)
+                .file_stem()
+                .map(|stem| stem == OsStr::new("atto"))
+        })
+        .unwrap_or(false);
+    let mut command = Cli::command();
+    if is_atto {
+        command = command.name("atto");
+    }
+    let matches = command.get_matches();
+    Cli::from_arg_matches(&matches).unwrap_or_else(|error| error.exit())
+}
+
+fn main() -> ExitCode {
+    match parse_cli().command {
+        Command::Check(args) => check(args),
+        Command::Run(args) => run(args),
+        Command::Test(args) => test(args),
+        Command::Lsp(args) => lsp(args),
+        Command::Doctor(args) => doctor(args),
+        Command::Version => version(),
+    }
+}
+
+fn compiler_command(args: &BackendArgs) -> CompilerCommand {
+    let mut command = args
+        .compiler
+        .clone()
+        .map(CompilerCommand::from_program)
+        .unwrap_or_else(CompilerCommand::discover);
+
+    if !args.compiler_args.is_empty() {
+        command = command.with_prefix_args(args.compiler_args.clone());
+    }
+    command
+}
+
+fn permissioned_compiler_command(
+    backend: &BackendArgs,
+    permissions: &PermissionArgs,
+) -> CompilerCommand {
+    compiler_command(backend).with_prefix_args(permissions.backend_args())
+}
+
+fn profiled_permissioned_compiler_command(
+    backend: &BackendArgs,
+    permissions: &PermissionArgs,
+    profile: &BuildProfileArgs,
+) -> CompilerCommand {
+    compiler_command(backend)
+        .with_prefix_args(profile.backend_args())
+        .with_prefix_args(permissions.backend_args())
+}
+
+fn check(args: CheckArgs) -> ExitCode {
+    let client = CompilerClient::new(profiled_permissioned_compiler_command(
+        &args.backend,
+        &args.permissions,
+        &args.profile,
+    ));
+    let mut diagnostics = Vec::new();
+    let mut failed = false;
+
+    for file in &args.files {
+        match client.check_file(file) {
+            Ok(result) => {
+                if !result.success {
+                    failed = true;
+                }
+                if result
+                    .diagnostics
+                    .iter()
+                    .any(|item| item.severity == DiagnosticSeverity::Error)
+                {
+                    failed = true;
+                }
+                diagnostics.extend(result.diagnostics);
+            }
+            Err(error) => {
+                failed = true;
+                diagnostics.push(Diagnostic::error(file.clone(), 1, 1, error.to_string()));
+            }
+        }
+    }
+
+    emit(&diagnostics, args.format);
+
+    if failed {
+        ExitCode::FAILURE
+    } else {
+        ExitCode::SUCCESS
+    }
+}
+
+fn run(args: RunArgs) -> ExitCode {
+    let command =
+        profiled_permissioned_compiler_command(&args.backend, &args.permissions, &args.profile);
+    let status = std::process::Command::new(&command.program)
+        .args(&command.prefix_args)
+        .arg(&args.file)
+        .status();
+
+    match status {
+        Ok(status) if status.success() => ExitCode::SUCCESS,
+        Ok(status) => ExitCode::from(status.code().unwrap_or(1).clamp(1, u8::MAX as i32) as u8),
+        Err(error) => {
+            eprintln!(
+                "oreslang run: failed to start compiler/runtime backend '{}': {error}",
+                command.display()
+            );
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn test(args: TestArgs) -> ExitCode {
+    // One test engine, not a second CLI parser. Canonical override wins;
+    // legacy override remains accepted. Never fall back from a broken explicit
+    // path: doing so could silently execute a different test implementation.
+    let configured =
+        std::env::var_os("ATTO_TEST_CLI").or_else(|| std::env::var_os("ORESLANG_TEST_CLI"));
+    let executables = configured.clone().map_or_else(
+        || vec![OsString::from("atto-test"), OsString::from("oreslang-test")],
+        |path| vec![path],
+    );
+    for executable in executables {
+        let mut command = std::process::Command::new(&executable);
+        command.args(&args.args);
+        if std::env::var_os("ORESLANG_TEST_RUNNER").is_none() {
+            if let Ok(current) = std::env::current_exe() {
+                command.env("ORESLANG_TEST_RUNNER", current);
+            }
+        }
+        match command.status() {
+            Ok(status) if status.success() => return ExitCode::SUCCESS,
+            Ok(status) => {
+                // A runner killed by a signal (OOM killer, CI cancellation)
+                // produced no verdict. Exit 1 means "finding observed", so
+                // report it as inconclusive (2), matching atto-test's own
+                // exit conventions, rather than as a test failure.
+                return ExitCode::from(status.code().unwrap_or(2).clamp(1, u8::MAX as i32) as u8);
+            }
+            Err(error) if configured.is_none() && error.kind() == std::io::ErrorKind::NotFound => {
+                continue;
+            }
+            Err(error) => {
+                eprintln!(
+                    "atto test: failed to start AttoLang test executable {:?}: {error}; install atto-test or set ATTO_TEST_CLI (legacy: ORESLANG_TEST_CLI)",
+                    executable
+                );
+                return ExitCode::from(2);
+            }
+        }
+    }
+    eprintln!("atto test: no atto-test or oreslang-test executable found on PATH; install atto-test or set ATTO_TEST_CLI");
+    ExitCode::from(2)
+}
+
+fn lsp(args: LspArgs) -> ExitCode {
+    if !args.stdio {
+        eprintln!("oreslang lsp currently requires --stdio");
+        return ExitCode::from(2);
+    }
+
+    let command = permissioned_compiler_command(&args.backend, &args.permissions);
+    match oreslang_lsp::run_stdio(command) {
+        Ok(0) => ExitCode::SUCCESS,
+        Ok(code) => ExitCode::from(code.clamp(0, u8::MAX as i32) as u8),
+        Err(error) => {
+            eprintln!("oreslang lsp: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
+fn version() -> ExitCode {
+    println!("oreslang {}", env!("CARGO_PKG_VERSION"));
+    ExitCode::SUCCESS
+}
+
+fn doctor(args: DoctorArgs) -> ExitCode {
+    let command = compiler_command(&args.backend);
+    println!("oreslang {}", env!("CARGO_PKG_VERSION"));
+    println!("diagnostic protocol: v{DIAGNOSTIC_PROTOCOL_VERSION}");
+    println!("compiler backend: {}", command.display());
+    println!("public editor command: atto check <file.atto> (legacy: oreslang check <file.ores>)");
+    println!("runtime command: atto run <file.atto> (legacy: oreslang run <file.ores>)");
+    println!("language server: atto lsp --stdio (legacy: oreslang lsp --stdio)");
+    println!("permissions: Deno-style --allow-*/--deny-*; runtime enforcement is always active");
+    println!("build profiles: --release | --strict-aot | --hard-rt; --freestanding is orthogonal");
+    println!("runtime reflection: forbidden by the build-profile v1 contract");
+    ExitCode::SUCCESS
+}
+
+fn emit(diagnostics: &[Diagnostic], format: OutputFormat) {
+    match format {
+        OutputFormat::Human => {
+            for item in diagnostics {
+                let start = &item.range.start;
+                match &item.code {
+                    Some(code) => println!(
+                        "{}:{}:{}: {}[{}]: {}",
+                        item.path.display(),
+                        start.line,
+                        start.column,
+                        item.severity,
+                        code,
+                        item.message
+                    ),
+                    None => println!(
+                        "{}:{}:{}: {}: {}",
+                        item.path.display(),
+                        start.line,
+                        start.column,
+                        item.severity,
+                        item.message
+                    ),
+                }
+            }
+        }
+        OutputFormat::Json => {
+            let report = CheckReport::new(diagnostics.to_vec());
+            println!(
+                "{}",
+                serde_json::to_string(&report).expect("diagnostic report must serialize")
+            );
+        }
+        OutputFormat::Jsonl => {
+            for diagnostic in diagnostics {
+                println!(
+                    "{}",
+                    serde_json::to_string(&JsonLineDiagnostic {
+                        version: DIAGNOSTIC_PROTOCOL_VERSION,
+                        diagnostic,
+                    })
+                    .expect("diagnostic must serialize")
+                );
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn permission_flags_never_take_grants_from_ambient_environment() {
+        use clap::CommandFactory;
+
+        // Examine Clap's parsed metadata rather than changing process env.
+        // This is concurrency-safe when Rust tests run in parallel and
+        // prevents accidental reintroduction of #[arg(env = ...)] grants.
+        let cli = Cli::command();
+        let mut checked = 0;
+        for subcommand in cli.get_subcommands() {
+            if !["check", "run", "lsp"].contains(&subcommand.get_name()) {
+                continue;
+            }
+            for argument in subcommand.get_arguments() {
+                let name = argument.get_id().to_string();
+                let is_permission = name == "allow_all"
+                    || name == "no_prompt"
+                    || name == "permission_check"
+                    || name.starts_with("allow_")
+                    || name.starts_with("deny_");
+                if is_permission {
+                    assert!(
+                        argument.get_env().is_none(),
+                        "permission option {name} on {} must require explicit argv",
+                        subcommand.get_name()
+                    );
+                    checked += 1;
+                }
+            }
+        }
+        assert_eq!(checked, 3 * 19, "all permission flags must be audited");
+    }
+
+    #[test]
+    fn explicit_compiler_override_wins() {
+        let args = BackendArgs {
+            compiler: Some(OsString::from("custom-compiler")),
+            compiler_args: vec![OsString::from("--internal")],
+        };
+
+        let command = compiler_command(&args);
+        assert_eq!(command.program, OsString::from("custom-compiler"));
+        assert_eq!(command.prefix_args, vec![OsString::from("--internal")]);
+    }
+
+    #[test]
+    fn bare_scope_does_not_consume_source_file() {
+        let cli = Cli::try_parse_from(["oreslang", "check", "--allow-read", "demo.ores"])
+            .expect("permission CLI should parse");
+
+        let Command::Check(args) = cli.command else {
+            panic!("expected check command");
+        };
+        assert_eq!(args.permissions.allow_read.as_deref(), Some("*"));
+        assert_eq!(args.files, vec![PathBuf::from("demo.ores")]);
+    }
+
+    #[test]
+    fn check_accepts_canonical_atto_source_path() {
+        let cli = Cli::try_parse_from(["atto", "check", "demo.atto"])
+            .expect("AttoLang source path should parse");
+
+        let Command::Check(args) = cli.command else {
+            panic!("expected check command");
+        };
+        assert_eq!(args.files, vec![PathBuf::from("demo.atto")]);
+    }
+
+    #[test]
+    fn run_accepts_canonical_atto_source_path() {
+        let cli = Cli::try_parse_from(["atto", "run", "demo.atto"])
+            .expect("AttoLang source path should parse");
+
+        let Command::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.file, PathBuf::from("demo.atto"));
+    }
+
+    #[test]
+    fn legacy_ores_source_paths_remain_accepted() {
+        let check = Cli::try_parse_from(["oreslang", "check", "demo.ores"])
+            .expect("legacy Ores source path should remain compatible");
+        let Command::Check(args) = check.command else {
+            panic!("expected check command");
+        };
+        assert_eq!(args.files, vec![PathBuf::from("demo.ores")]);
+
+        let run = Cli::try_parse_from(["oreslang", "run", "demo.ores"])
+            .expect("legacy Ores source path should remain compatible");
+        let Command::Run(args) = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.file, PathBuf::from("demo.ores"));
+    }
+
+    #[test]
+    fn source_extensions_are_independent_of_cli_alias() {
+        for (binary, source) in [("atto", "demo.ores"), ("oreslang", "demo.atto")] {
+            let check = Cli::try_parse_from([binary, "check", source])
+                .expect("both source extensions must work with either CLI alias");
+            let Command::Check(args) = check.command else {
+                panic!("expected check command");
+            };
+            assert_eq!(args.files, vec![PathBuf::from(source)]);
+
+            let run = Cli::try_parse_from([binary, "run", source])
+                .expect("both source extensions must work with either CLI alias");
+            let Command::Run(args) = run.command else {
+                panic!("expected run command");
+            };
+            assert_eq!(args.file, PathBuf::from(source));
+        }
+    }
+
+    #[test]
+    fn canonical_atto_source_survives_bare_permission_flags() {
+        let check = Cli::try_parse_from(["atto", "check", "--allow-read", "demo.atto"])
+            .expect("bare permission must not consume canonical source path");
+        let Command::Check(args) = check.command else {
+            panic!("expected check command");
+        };
+        assert_eq!(args.permissions.allow_read.as_deref(), Some("*"));
+        assert_eq!(args.files, vec![PathBuf::from("demo.atto")]);
+
+        let run = Cli::try_parse_from(["atto", "run", "--allow-net", "demo.atto"])
+            .expect("bare permission must not consume canonical source path");
+        let Command::Run(args) = run.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.permissions.allow_net.as_deref(), Some("*"));
+        assert_eq!(args.file, PathBuf::from("demo.atto"));
+    }
+
+    #[test]
+    fn run_accepts_bare_permission_without_swallowing_source() {
+        let cli = Cli::try_parse_from(["oreslang", "run", "--allow-net", "demo.ores"])
+            .expect("run permission CLI should parse");
+
+        let Command::Run(args) = cli.command else {
+            panic!("expected run command");
+        };
+        assert_eq!(args.permissions.allow_net.as_deref(), Some("*"));
+        assert_eq!(args.file, PathBuf::from("demo.ores"));
+    }
+
+    #[test]
+    fn scoped_permissions_forward_to_compiler_backend() {
+        let cli = Cli::try_parse_from([
+            "oreslang",
+            "check",
+            "--permission-check=compile",
+            "--allow-read=./data,/tmp/shared",
+            "--deny-read=./data/secrets",
+            "--allow-net=api.example.com:443",
+            "demo.ores",
+        ])
+        .expect("permission CLI should parse");
+
+        let Command::Check(args) = cli.command else {
+            panic!("expected check command");
+        };
+        let forwarded = args.permissions.backend_args();
+        let rendered: Vec<_> = forwarded
+            .iter()
+            .map(|value| value.to_string_lossy().into_owned())
+            .collect();
+
+        assert!(rendered.contains(&"--permission-check=compile".to_owned()));
+        assert!(rendered.contains(&"--allow-read=./data,/tmp/shared".to_owned()));
+        assert!(rendered.contains(&"--deny-read=./data/secrets".to_owned()));
+        assert!(rendered.contains(&"--allow-net=api.example.com:443".to_owned()));
+    }
+}
