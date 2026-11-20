@@ -25,7 +25,7 @@ fn stderr(output: &Output) -> String {
 #[test]
 fn explicit_guest_grants_fail_before_node_or_any_host_io() {
     for flag in ["--allow-all", "--allow-read=./data",
-                 "--allow-net=example.com:443", "--allow-run", "--allow-ffi"] {
+                 "--allow-net=example.com:443", "--allow-run=*", "--allow-ffi=*"] {
         let output = run(&[flag], None);
         assert_eq!(output.status.code(), Some(2), "{flag}: {}", stderr(&output));
         assert!(stderr(&output).contains("E_HOST_PERMISSIONS_UNSUPPORTED"),
