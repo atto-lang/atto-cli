@@ -14,13 +14,19 @@ fn main() -> ExitCode {
         }
     };
     let parser = BundledFlags2Env::new();
-    if let Ok(true) = parser.is_help_requested(&args) {
+    // Retain the historical -h help alias; security options are still parsed
+    // solely by flags2env, and this alias cannot create authority.
+    let mut help_args = args.clone();
+    if help_args.len() == 2 && help_args[1] == "-h" {
+        help_args[1] = "--help".to_string();
+    }
+    if let Ok(true) = parser.is_help_requested(&help_args) {
         let schema = concat!(env!("CARGO_MANIFEST_DIR"), "/.cli-flags.toml");
         if parser.audit_config(Some(schema)).is_err() {
             eprintln!("E_CLI_SCHEMA: invalid bundled option schema");
             return ExitCode::from(2);
         }
-        match parser.help_table_for_argv("atto", &args, 0, Some(schema)) {
+        match parser.help_table_for_argv("atto", &help_args, 0, Some(schema)) {
             Ok(help) => {
                 println!("{help}");
                 return ExitCode::SUCCESS;
