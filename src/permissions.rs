@@ -217,6 +217,56 @@ fn canonical_net(raw: &str) -> Result<String, String> {
     Ok(format!("{}{}{}", if wildcard { "*." } else { "" }, canonical, suffix))
 }
 
+/// Explicit operator argv **request**, not a verified artifact descriptor or
+/// an authority token. This canonical representation deliberately contains
+/// no host I/O permission unless an independently trusted loader intersects
+/// it with the signed artifact, host, TenantVM and actor ceilings.
+/// Never accept caller-provided bytes as proof of a permission grant.
+pub fn canonical_argv_request_v1(request: &PermissionRequest) -> Result<Vec<u8>, String> {
+    let mut out = b"ATTO-ARGV-PERMISSION-REQUEST\0v1".to_vec();
+    // An explicit deny-all marker is mandatory even for an empty request.
+    out.push(u8::from(request.is_deny_all_request()));
+    out.push(u8::from(request.allow_all));
+    out.push(u8::from(request.check_at_compile));
+    for (kind_id, kind) in Kind::ALL.into_iter().enumerate() {
+        out.push(kind_id as u8);
+        for map in [&request.allows, &request.denies] {
+            match map.get(&kind) {
+                None => out.push(0u8),
+                Some(Scope::All) => out.push(1u8),
+                Some(Scope::Some(tokens)) => {
+                    if tokens.is_empty() {
+                        return Err(invalid("empty manual policy scope set"));
+                    }
+                    let count = u16::try_from(tokens.len())
+                        .map_err(|_| invalid("too many manual policy scopes"))?;
+                    out.push(2u8);
+                    out.extend_from_slice(&count.to_le_bytes());
+                    for token in tokens {
+                        // Enforce canonical syntax at the encoding boundary,
+                        // including manually constructed Rust policy values.
+                        let valid = match parse_scope(kind, token)? {
+                            Scope::Some(one) => one.len() == 1 && one.contains(token),
+                            Scope::All => false,
+                        };
+                        if !valid {
+                            return Err(invalid("noncanonical policy scope"));
+                        }
+                        let length = u16::try_from(token.len())
+                            .map_err(|_| invalid("oversized manual policy scope"))?;
+                        out.extend_from_slice(&length.to_le_bytes());
+                        out.extend_from_slice(token.as_bytes());
+                    }
+                }
+            }
+        }
+    }
+    if out.len() > 262_144 {
+        return Err(invalid("oversized canonical argv permission request"));
+    }
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -224,6 +274,46 @@ mod tests {
         let flags: HashMap<String, String> = values.iter()
             .map(|(k, v)| (k.to_string(), v.to_string())).collect();
         PermissionRequest::from_argv_only(&flags).unwrap()
+    }
+
+    #[test]
+    fn canonical_request_preserves_explicit_deny_all_and_scope_overrides() {
+        let empty = parsed(&[]);
+        let bytes = canonical_argv_request_v1(&empty).unwrap();
+        assert!(bytes.starts_with(b"ATTO-ARGV-PERMISSION-REQUEST\0v1"));
+        assert_eq!(bytes[b"ATTO-ARGV-PERMISSION-REQUEST\0v1".len()], 1u8);
+        let requested = parsed(&[
+            ("ATTO_ALLOW_READ", "data"),
+            ("ATTO_DENY_READ", "data/secrets"),
+        ]);
+        let encoded = canonical_argv_request_v1(&requested).unwrap();
+        assert_ne!(encoded, bytes);
+        assert!(encoded.windows(b"data/secrets".len())
+            .any(|item| item == b"data/secrets"));
+        assert!(encoded.windows(b"data".len()).any(|item| item == b"data"));
+    }
+
+    #[test]
+    fn canonical_request_is_independent_of_hashmap_order() {
+        let first = parsed(&[("ATTO_ALLOW_NET", "example.com:443"),
+                             ("ATTO_ALLOW_READ", "./data"),
+                             ("ATTO_DENY_NET", "blocked.example.com")]);
+        let second = parsed(&[("ATTO_DENY_NET", "blocked.example.com"),
+                              ("ATTO_ALLOW_READ", "./data"),
+                              ("ATTO_ALLOW_NET", "example.com:443")]);
+        assert_eq!(canonical_argv_request_v1(&first).unwrap(),
+                   canonical_argv_request_v1(&second).unwrap());
+    }
+
+    #[test]
+    fn manually_forged_noncanonical_scope_is_not_serializable() {
+        let mut forged = PermissionRequest::default();
+        forged.allows.insert(Kind::Read,
+            Scope::Some(BTreeSet::from(["../outside".to_owned()])));
+        assert!(canonical_argv_request_v1(&forged).is_err());
+        forged.allows.insert(Kind::Net,
+            Scope::Some(BTreeSet::from(["EXAMPLE.COM:443".to_owned()])));
+        assert!(canonical_argv_request_v1(&forged).is_err());
     }
 
     #[test]
