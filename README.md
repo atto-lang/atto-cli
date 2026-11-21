@@ -44,6 +44,12 @@ AttoLang is the canonical project name; new source, examples and documentation u
 
 **Acceptance:** name the exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
 
+## Optional canonical Rust borrow verification (draft)
+
+Normal `atto check program.atto` continues to rely on each compiler's own fast, in-pass ownership/borrow analysis. The new **opt-in** `atto borrow-check program.atto` command launches the compiler's `atto-loan-cfg-export` tool, requires it to successfully compile and export a bounded typed CFG, and passes that manifest over stdin to the independent canonical Rust `atto-cfg-ssa-check` verifier. Both executables are experimental in [atto-source.rs #295](https://github.com/atto-lang/atto-source.rs/pull/295) and [atto-borrow-checker.rs #42](https://github.com/atto-lang/atto-borrow-checker.rs/pull/42); they are **not yet bundled with this CLI**.
+
+The currently supported deep-analysis profile is a limited diagnostic CFG/SSA loan oracle, not proof of whole-program lifetimes, native guest execution or production backend parity. Missing tools or unverified checks fail closed. See [deep borrow verification and CI usage](docs/deep-borrow-check.md).
+
 ## Source-free toolchain doctor preview
 
 Run `python tools/atto.py doctor` to inspect tool availability on PATH, or `python tools/atto.py doctor --json --require rust --require wasm` to require a selected backend's tools. Missing required tools return exit code 2; output uses schema version 1 and does not expose executable paths. The command never runs detected binaries, invokes a compiler, or makes a runtime/parity claim. Build, run, test, and permission management remain unimplemented here.
