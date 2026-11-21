@@ -106,7 +106,7 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         eprintln!("atto borrow-check: compiler exported empty or non-UTF8 MIR");
         return ExitCode::from(2);
     }
-    if !manifest.starts_with(b"ATTO_LOAN_CFG_V1\\n") {
+    if !manifest.starts_with(b"ATTO_LOAN_CFG_V1\n") {
         manifest.fill(0);
         eprintln!("atto borrow-check: unsupported or missing typed loan CFG version");
         return ExitCode::from(2);
