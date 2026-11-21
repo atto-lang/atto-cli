@@ -102,7 +102,13 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         return classify_status(export_status);
     }
     if manifest.is_empty() || std::str::from_utf8(&manifest).is_err() {
+        manifest.fill(0);
         eprintln!("atto borrow-check: compiler exported empty or non-UTF8 MIR");
+        return ExitCode::from(2);
+    }
+    if !manifest.starts_with(b"ATTO_LOAN_CFG_V1\\n") {
+        manifest.fill(0);
+        eprintln!("atto borrow-check: unsupported or missing typed loan CFG version");
         return ExitCode::from(2);
     }
 
