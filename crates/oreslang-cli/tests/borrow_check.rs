@@ -130,6 +130,33 @@ mod unix {
     }
 
     #[test]
+    fn unknown_manifest_version_is_rejected_before_verifier() {
+        let dir = Sandbox::new("wrong-version");
+        let exporter = dir.script("exporter", "#!/bin/sh\nprintf 'UNSUPPORTED_CFG\\n'\n");
+        let checker = dir.script(
+            "checker",
+            "#!/bin/sh\necho CHECKER_SHOULD_NOT_RUN\nexit 0\n",
+        );
+        let output = invoke(&exporter, &checker);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(String::from_utf8_lossy(&output.stderr).contains("unsupported or missing"));
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("CHECKER_SHOULD_NOT_RUN"));
+    }
+
+    #[test]
+    fn empty_export_is_rejected_before_verifier() {
+        let dir = Sandbox::new("empty-export");
+        let exporter = dir.script("exporter", "#!/bin/sh\nexit 0\n");
+        let checker = dir.script(
+            "checker",
+            "#!/bin/sh\necho CHECKER_SHOULD_NOT_RUN\nexit 0\n",
+        );
+        let output = invoke(&exporter, &checker);
+        assert_eq!(output.status.code(), Some(2), "{output:?}");
+        assert!(!String::from_utf8_lossy(&output.stdout).contains("CHECKER_SHOULD_NOT_RUN"));
+    }
+
+    #[test]
     fn oversized_export_is_rejected_without_invoking_checker() {
         let dir = Sandbox::new("overflow");
         let exporter = dir.script(
