@@ -29,10 +29,8 @@ mod unix {
 
     impl Sandbox {
         fn new(tag: &str) -> Self {
-            let dir = std::env::temp_dir().join(format!(
-                "atto-borrow-bridge-{tag}-{}",
-                std::process::id()
-            ));
+            let dir = std::env::temp_dir()
+                .join(format!("atto-borrow-bridge-{tag}-{}", std::process::id()));
             fs::create_dir(&dir).expect("create exclusive fixture directory");
             fs::set_permissions(&dir, fs::Permissions::from_mode(0o700))
                 .expect("restrict fixture directory");
@@ -82,7 +80,10 @@ mod unix {
         let checker = dir.script("checker with spaces", VALID_CHECKER);
         let output = invoke(&exporter, &checker);
         assert_eq!(output.status.code(), Some(0), "{output:?}");
-        assert_eq!(String::from_utf8_lossy(&output.stdout), "SSA_DIAGNOSTIC_OK stub 1 1\n");
+        assert_eq!(
+            String::from_utf8_lossy(&output.stdout),
+            "SSA_DIAGNOSTIC_OK stub 1 1\n"
+        );
     }
 
     #[test]
@@ -115,7 +116,10 @@ mod unix {
     fn missing_checker_is_infrastructure_failure() {
         let dir = Sandbox::new("checker-missing");
         let exporter = dir.script("exporter", VALID_EXPORTER);
-        let output = invoke(&exporter, Path::new("/deliberately-absent-canonical-checker"));
+        let output = invoke(
+            &exporter,
+            Path::new("/deliberately-absent-canonical-checker"),
+        );
         assert_eq!(output.status.code(), Some(2), "{output:?}");
     }
 
@@ -159,10 +163,7 @@ mod unix {
     #[test]
     fn oversized_export_is_rejected_without_invoking_checker() {
         let dir = Sandbox::new("overflow");
-        let exporter = dir.script(
-            "exporter",
-            "#!/bin/sh\nhead -c 8388609 /dev/zero\n",
-        );
+        let exporter = dir.script("exporter", "#!/bin/sh\nhead -c 8388609 /dev/zero\n");
         let checker = dir.script(
             "checker",
             "#!/bin/sh\necho CHECKER_SHOULD_NOT_RUN\nexit 0\n",
