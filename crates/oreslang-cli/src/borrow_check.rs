@@ -181,8 +181,14 @@ mod tests {
             "demo.atto",
         ])
         .unwrap();
-        assert_eq!(parsed.args.exporter, OsString::from("/private/compiler export"));
-        assert_eq!(parsed.args.checker, OsString::from("/private/borrow checker"));
+        assert_eq!(
+            parsed.args.exporter,
+            OsString::from("/private/compiler export")
+        );
+        assert_eq!(
+            parsed.args.checker,
+            OsString::from("/private/borrow checker")
+        );
     }
 
     #[test]
