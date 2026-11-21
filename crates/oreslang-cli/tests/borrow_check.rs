@@ -67,8 +67,13 @@ mod unix {
 
     const VALID_EXPORTER: &str =
         "#!/bin/sh\n[ \"$#\" -eq 1 ] || exit 4\nprintf 'ATTO_LOAN_CFG_V1\\n'\n";
-    const VALID_CHECKER: &str =
-        "#!/bin/sh\n[ \"$1\" = '-' ] || exit 4\nread -r line\n[ \"$line\" = 'ATTO_LOAN_CFG_V1' ] || exit 5\nprintf 'SSA_DIAGNOSTIC_OK stub 1 1\\n'\n";
+    const VALID_CHECKER: &str = concat!(
+        "#!/bin/sh\n",
+        "[ \"$1\" = '-' ] || exit 4\n",
+        "read -r line\n",
+        "[ \"$line\" = 'ATTO_LOAN_CFG_V1' ] || exit 5\n",
+        "printf 'SSA_DIAGNOSTIC_OK stub 1 1\\n'\n"
+    );
 
     #[test]
     fn pipes_compiler_output_into_checker_stdin() {
@@ -97,7 +102,10 @@ mod unix {
     fn checker_finding_rejects_compilation_claim() {
         let dir = Sandbox::new("checker-reject");
         let exporter = dir.script("exporter", VALID_EXPORTER);
-        let checker = dir.script("checker", "#!/bin/sh\ncat > /dev/null\necho INDEPENDENT_SSA_REJECT >&2\nexit 1\n");
+        let checker = dir.script(
+            "checker",
+            "#!/bin/sh\ncat > /dev/null\necho INDEPENDENT_SSA_REJECT >&2\nexit 1\n",
+        );
         let output = invoke(&exporter, &checker);
         assert_eq!(output.status.code(), Some(1), "{output:?}");
         assert!(String::from_utf8_lossy(&output.stderr).contains("INDEPENDENT_SSA_REJECT"));
