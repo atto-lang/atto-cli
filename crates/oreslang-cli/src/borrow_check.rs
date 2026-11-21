@@ -52,9 +52,10 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         Ok(child) => child,
         Err(error) => {
             eprintln!(
-                "atto borrow-check: cannot start compiler CFG exporter {:?}: {error};                  install atto-loan-cfg-export or provide --exporter",
+                "atto borrow-check: cannot start compiler CFG exporter {:?}: {error}",
                 args.exporter
             );
+            eprintln!("install atto-loan-cfg-export or provide --exporter");
             return ExitCode::from(2);
         }
     };
@@ -115,9 +116,10 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         Ok(child) => child,
         Err(error) => {
             eprintln!(
-                "atto borrow-check: cannot start canonical Rust checker {:?}: {error};                  install atto-cfg-ssa-check or provide --checker",
+                "atto borrow-check: cannot start canonical Rust checker {:?}: {error}",
                 args.checker
             );
+            eprintln!("install atto-cfg-ssa-check or provide --checker");
             return ExitCode::from(2);
         }
     };
