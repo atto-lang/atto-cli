@@ -75,12 +75,14 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         .read_to_end(&mut manifest);
     drop(stdout);
     if let Err(error) = read_result {
+        manifest.fill(0);
         let _ = exporter.kill();
         let _ = exporter.wait();
         eprintln!("atto borrow-check: cannot read compiler MIR: {error}");
         return ExitCode::from(2);
     }
     if manifest.len() > MAX_MANIFEST_BYTES {
+        manifest.fill(0);
         let _ = exporter.kill();
         let _ = exporter.wait();
         eprintln!("atto borrow-check: compiler MIR exceeds 8 MiB limit");
@@ -124,8 +126,8 @@ pub(crate) fn run(args: BorrowCheckArgs) -> ExitCode {
         .take()
         .expect("canonical verifier was started with piped stdin")
         .write_all(&manifest);
-    // Clear the potentially sensitive source-derived manifest before exit.
-    manifest.clear();
+    // Overwrite source-derived bytes in memory; never create a temp file.
+    manifest.fill(0);
     if let Err(error) = write_result {
         let _ = checker.kill();
         let _ = checker.wait();
