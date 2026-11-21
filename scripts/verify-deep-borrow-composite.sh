@@ -76,9 +76,14 @@ fi
 negative="$ATTO_COMPILER_DIR/tests/fixtures/fail/ownership-borrow-nll-live-after-mutation.atto"
 test -s "$negative" || { echo "MISSING_NEGATIVE_SOURCE" >&2; exit 2; }
 echo "NEGATIVE_COMPILER_REJECTION"
-if "$cli" borrow-check "$negative" --exporter "$exporter" --checker "$checker" \
-    >"$test_dir/fail.out" 2>"$test_dir/fail.err"; then
-  echo "UNSAFE_SOURCE_ACCEPTED" >&2
+set +e
+"$cli" borrow-check "$negative" --exporter "$exporter" --checker "$checker" \
+    >"$test_dir/fail.out" 2>"$test_dir/fail.err"
+negative_status=$?
+set -e
+if [[ "$negative_status" -ne 1 ]]; then
+  cat "$test_dir/fail.err" >&2
+  echo "UNSAFE_SOURCE_NOT_SEMANTICALLY_REJECTED status=$negative_status" >&2
   exit 1
 fi
 if grep -q '^SSA_DIAGNOSTIC_OK ' "$test_dir/fail.out"; then
