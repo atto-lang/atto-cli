@@ -643,7 +643,9 @@ fn doctor(args: DoctorArgs) -> ExitCode {
     println!("public editor command: atto check <file.atto> (legacy: oreslang check <file.ores>)");
     println!("runtime command: atto run <file.atto> (legacy: oreslang run <file.ores>)");
     println!("deep borrow diagnostic: atto borrow-check <file.atto>");
-    println!("deep borrow status: experimental; requires external exporter and canonical Rust checker");
+    println!(
+        "deep borrow status: experimental; requires external exporter and canonical Rust checker"
+    );
     println!("language server: atto lsp --stdio (legacy: oreslang lsp --stdio)");
     println!("permissions: Deno-style --allow-*/--deny-*; runtime enforcement is always active");
     println!("build profiles: --release | --strict-aot | --hard-rt; --freestanding is orthogonal");
