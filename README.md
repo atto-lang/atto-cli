@@ -1,253 +1,59 @@
-# AttoLang CLI (`oreslang-cli`)
+> **AI agent instructions (organization-wide):** Before working on code, issues, or pull requests, read and follow the [organization `AGENTS.md`](https://github.com/atto-lang/.github/blob/main/AGENTS.md), including its **merge-first stealth-development policy**. Honor any repository-local `AGENTS.md`, explicit holds, and GitHub-enforced rules.
 
-Canonical developer-tooling and IDE frontend for **AttoLang**.
+# atto-cli
 
-The repository and legacy `oreslang` executable remain unchanged for compatibility.
-A new `atto` executable is built from **the same source file**. This is not
-a second parser, compiler, privilege boundary or diagnostic protocol.
+Command-line tools for building, running, testing, and managing AttoLang projects.
 
+## Naming migration and language authority
 
-The public executables are:
+This repository is maintained at [atto-lang/atto-cli](https://github.com/atto-lang/atto-cli); use `https://github.com/atto-lang/atto-cli.git` for Git remotes and canonical `.atto` source examples. The normative language contract is [atto-spec](https://github.com/atto-lang/atto-spec), with executable guest evidence tracked by [atto-platform-conformance](https://github.com/atto-lang/atto-platform-conformance). Follow current ownership, borrowing, effects, actor, and syntax rules there; do not infer implemented features from a README or unexecuted CI.
 
-```text
-atto        # preferred AttoLang command
-oreslang    # retained compatibility command
-```
+## Purpose
 
-Both share subcommands, permission gates, backend selection, diagnostic JSON,
-and exit codes. Only the executable name shown in help/usage differs.
+Provide a consistent CLI surface for builds, run/test workflows, and permissions.
 
-```sh
-atto --help
-atto --version
-atto check app.atto
-atto run app.atto
-oreslang check app.ores  # historical command and extension still forwarded
-```
-
-The CLI forwards source paths unchanged; `.atto` admission and compilation
-remain the chosen backend's responsibility, not proof of feature parity.
-
-This repository is **not** `ORESoftware/ores-cli` and editor integrations must
-not depend on that unrelated tool.
+## Repository responsibilities
 
-## Ownership boundary
+- Keep interfaces, schemas, and behavior documented in a backend-neutral form where applicable.
+- Use test fixtures and reproducible evidence to distinguish proposed behavior from implemented behavior.
+- Record breaking changes, migration notes, and dependencies on other AttoLang components.
 
-- `oreslang-source.java` owns the AttoLang lexer, parser, type checker,
-  ownership checker, import graph, compiler APIs, runtime, and authoritative
-  diagnostic production.
-- `oreslang-cli` owns the developer-facing process/transport boundary:
-  command-line UX, machine-readable diagnostic formats, compiler discovery,
-  and eventually LSP/session management.
-- `vscode-plugins` and `sublime-text-plugins` are thin editor clients. They
-  invoke `oreslang`; they do not implement a second AttoLang compiler.
+## Validation
 
-The Rust CLI deliberately does **not** parse or type-check AttoLang source.
-
-## Commands
+Validation should rely on checked-in tests and exact-commit CI results. When reporting parity, distinguish **passed**, **failed**, **unsupported**, and **not executed**. Avoid inferring guest-runtime support from host-only tests.
 
-The commands below preserve existing `.ores` examples and the current `oreslang` executable. New AttoLang source should use `.atto` when a specific compiler/CLI release accepts that extension; support is not established by this README.
+## Status and development
 
+This README records the intended role of this repository; it is not a claim of feature completeness. Consult the source tree and workflow files for actual implementation and verified build commands. Contributions should preserve compatibility with the canonical language contract.
 
-### Check
+## Ecosystem
 
-```bash
-oreslang check app.ores
-oreslang check app.ores lib.ores
-oreslang check --format json app.ores
-oreslang check --format jsonl app.ores
-```
+- [AttoLang](https://github.com/atto-lang)
+- [Language specification](https://github.com/atto-lang/atto-spec)
+- [Cross-platform conformance](https://github.com/atto-lang/atto-platform-conformance)
 
-`oreslang check` is non-executing. The compiler backend may parse, resolve,
-link symbolically, type-check, ownership-check, and perform static capability
-validation, but it must not run guest `init`, `main`, actors, GPU kernels, or
-other user code.
+## Repository ownership and contribution routing
 
-Human diagnostics use the editor-friendly form:
+**Belongs here:** Cross-backend user-facing build/run/test entry points, project manifests, target selection and ergonomic diagnostics.
 
-```text
-/path/to/app.ores:12:7: error: expected expression
-```
+**Belongs elsewhere:** Individual compiler backend implementations belong in atto-source.*; test harness mechanics belong in atto-test.cli; language grammar in atto-spec.
 
-JSON uses diagnostic protocol version 1:
+**Security and portability boundary:** Do not quietly enable network/host capabilities. Fail closed on unsupported targets; pin selected compiler, artifact and manifest provenance.
 
-```json
-{
-  "version": 1,
-  "ok": false,
-  "diagnostics": [
-    {
-      "path": "/path/to/app.ores",
-      "range": {
-        "start": {"line": 12, "column": 7},
-        "end": {"line": 12, "column": 8}
-      },
-      "severity": "error",
-      "source": "oreslang",
-      "message": "expected expression"
-    }
-  ]
-}
-```
+AttoLang is the canonical project name; new source, examples and documentation use `.atto` and the `atto-lang` repository organization. This README defines scope, not feature readiness.
 
-Positions are one-based at the CLI protocol boundary. See
-[`docs/IDE_PROTOCOL.md`](docs/IDE_PROTOCOL.md) for the editor contract.
+**Acceptance:** name the exact source SHA/tree, runtime/toolchain, positive and negative checks and execution receipt before claiming support. Host-only tests and empty CI steps do not prove guest execution.
 
-### Doctor
+## Source-free toolchain doctor preview
 
-```bash
-oreslang doctor
-```
+Run `python tools/atto.py doctor` to inspect tool availability on PATH, or `python tools/atto.py doctor --json --require rust --require wasm` to require a selected backend's tools. Missing required tools return exit code 2; output uses schema version 1 and does not expose executable paths. The command never runs detected binaries, invokes a compiler, or makes a runtime/parity claim. Build, run, test, and permission management remain unimplemented here.
 
-Shows the diagnostic protocol version and the compiler backend that will be
-used.
+Use `python -m unittest discover -s tests -v` for this preview's deterministic host-only tests.
 
-### Version
+## Legacy provenance and transfer verification
 
-```bash
-oreslang version
-oreslang --version
-```
+The historical predecessor was `ores-truffle-oreslang/oreslang-cli`. This repository is maintained in `atto-lang`; matching names or imported history do not establish preserved numeric repository identity or code parity. Preserve working legacy `.ores` inputs and historical package/CLI aliases until compiler-backed replacements and consumers are verified. New source follows canonical `.atto` contracts.
 
-## Permission grant boundary
+Language build/check/execute developer CLI and compiler invocation contracts belong here; production deployment orchestration and billing do not. [atto-lang](https://github.com/atto-lang) maintains language, portable libraries and tooling; [atto-co](https://github.com/atto-co) separately governs commercial deployment, tenant infrastructure, identity, marketplace and billing. Any further original-ID transfer or commercial carve-out requires separate owner authorization and independent security review. This document authorizes no transfer or private-source mirror.
 
-Permission grants are **explicit command-line authorization**. The Rust CLI
-does not infer `--allow-all`, `--allow-*`, `--deny-*` or
-`--permission-check` from inherited `ORESLANG_*` environment variables.
-In particular, an ambient `ORESLANG_ALLOW_ALL=true` must never turn a
-`oreslang run app.ores` into a privileged execution. Explicit denies still
-override explicit grants at the backend runtime policy boundary.
-
-The checked-in `.cli-flags.toml` is a **future canonical flags-2-env
-schema**. Its environment-field names must not be interpreted by this
-legacy Clap launcher as an alternate authorization channel. The eventual
-single-parser migration must preserve explicit source-of-authority tracking,
-non-escalation across compiler/runtime layers, and denial when permission
-provenance is absent. Do not load ambient or `.env` permission values as
-an implicit substitute for command-line flags.
-
-## Compiler backend discovery
-
-The current compiler authority lives in `oreslang-source.java`. Until a
-persistent compiler service/native distribution is available, the Rust CLI
-delegates to that compiler's non-executing check entrypoint.
-
-Backend resolution is:
-
-1. explicit `--compiler /path/to/backend`;
-2. `ORESLANG_COMPILER_JAR=/path/to/oreslang-source.jar` → `java -jar ...`;
-3. `ORESLANG_COMPILER=/path/to/compiler-launcher`;
-4. fallback internal launcher name `oreslang-compiler`.
-
-The CLI intentionally never falls back to a command named `ores`, so it cannot
-accidentally resolve to the unrelated `ORESoftware/ores-cli` on PATH. The
-compiler distribution should provide `oreslang-compiler` or set one of the
-explicit backend environment variables.
-
-The public/editor command remains `oreslang check ...` in every case.
-
-For unusual local layouts, the CLI also supports prefix arguments:
-
-```bash
-oreslang check --compiler /path/to/backend --compiler-arg ARG app.ores
-```
-
-## Language server
-
-The Rust CLI now exposes a long-lived editor process:
-
-```bash
-oreslang lsp --stdio
-```
-
-The LSP runtime owns:
-
-- JSON-RPC `Content-Length` framing over stdin/stdout;
-- full-document synchronization and an in-memory unsaved-buffer cache;
-- asynchronous compiler checks through a restartable compiler supervisor;
-- file-result caching for unchanged source files;
-- portable external-file watching;
-- stale-result suppression using per-document generations;
-- compiler-worker panic isolation/recovery;
-- LSP diagnostic conversion from the canonical one-based compiler protocol.
-
-Unsaved editor text is cached but is not written to disk. Until
-`oreslang-source.java` exposes an explicit source-overlay API, authoritative
-compiler checks are run for the saved file representation. This keeps editor
-tooling from mutating source merely to obtain diagnostics.
-
-The compiler supervisor is deliberately a stable Rust lifecycle boundary.
-Today it adapts the compiler's one-shot non-executing `--check` entrypoint.
-When the compiler grows a persistent RPC/native service, that process can be
-owned and restarted behind the same supervisor API.
-
-## Native distribution
-
-Tags matching `v*` build and attach native `oreslang` binaries for:
-
-- Linux x86-64;
-- macOS x86-64;
-- macOS Apple Silicon;
-- Windows x86-64.
-
-## Direction
-
-Next layers include source-overlay checking, `oreslang check --watch`, and
-compiler-backed formatting, symbols, semantic tokens, references, rename,
-completion, and code actions.
-
-Those features belong here as transport/tooling. AttoLang language semantics
-remain in `oreslang-source.java`.
-
-## Compiler PR checkpoint (2026-10-06)
-
-A [repository-specific compiler compatibility matrix](docs/compiler-pr-sync.md) tracks the 10 newest `oreslang-source.java` PRs. They remain unmerged upstream; existing demos, build flags, and stable compiler references stay unchanged pending exact-SHA conformance testing.
-
-
-## Test CLI: `atto test` (race, fuzz and sanitizers)
-
-The public `atto test` subcommand delegates directly to the Rust
-`atto-test` runner in `ores-truffle-oreslang/oreslang-test.cli`.
-The legacy `oreslang test` / `oreslang-test` names remain compatible.
-Both executable names forward the exact test arguments and exit code without
-inventing compiler or sanitizer results.
-
-```sh
-atto test --fuzz --cases 1000 --seed 123
-atto test --race --trace tests/traces/ordered.jsonl  # offline trace analysis
-atto test --race                                      # inconclusive until trusted runtime trace support
-```
-
-The dispatcher selects `ATTO_TEST_CLI=/absolute/path/to/atto-test` first,
-then the legacy `ORESLANG_TEST_CLI` override. With neither configured it
-tries `atto-test` and then `oreslang-test` on PATH. **A failed explicit
-override never silently falls back.** Native test compiler selection is still
-controlled by the test runner's `ORESLANG_BIN` (compatibility variable).
-
-`--fuzz` mutates stdin for an explicitly configured executable in
-`atto-test.toml`, not automatically compiled AttoLang source. Sanitizer
-reports in child output are observable findings, but cannot establish whether
-ASan/UBSan/TSan instrumentation actually covered guest code.
-`--race --trace` is an offline happens-before analysis, not live TSan/guest
-scheduler validation. Uninstrumented `--race` exits 2, never a fake pass.
-
-## Build profiles
-
-`oreslang check` and `oreslang run` accept the backend-neutral build-profile selectors
-`--release`, `--strict-aot`, and `--hard-rt`. They are mutually exclusive selectors;
-`--hard-rt` semantically includes the requirements of `strict-aot`, which includes
-`release`. `--freestanding` is orthogonal and may be combined with any profile.
-
-Runtime reflection is forbidden by the v1 profile contract. Backends must use compile-time
-introspection/code generation and explicit reachability roots instead. A backend that cannot
-prove a requested profile must reject it rather than silently weakening it.
-
-The canonical profile semantics live in `oreslang-target-profiles/docs/BUILD_PROFILES.md`.
-
-## Repository ownership and migration (2026-11-08)
-
-**AttoLang** is the public language name; this repository remains `ores-truffle-oreslang/oreslang-cli` until an authorized move. Keep existing `oreslang-*` CLI/package conventions and supported `.ores` files compatible. **Belongs here:** language build/check/execute developer CLI and compiler invocation contracts. **Does not belong here:** production AttoCo deployment orchestration or billing.
-
-**Organization model:** [`atto-lang`](https://github.com/atto-lang) hosts language syntax, compilers, portable core/std, tooling, conformance, ecosystem libraries and demos. [`atto-co`](https://github.com/atto-co) hosts separately governed deployment, tenant runtime, identity, registry, billing and managed cloud infrastructure. The existence of a related `atto-*` repo is not evidence this repository was transferred or that its code and tests are equivalent.
-
-**Proposed first transfer:** `atto-lang/oreslang-cli`, retaining the same GitHub numeric repo identity and old name; this is not a completed transfer or an approved direct move into `atto-co`. Future AttoCo carve-outs require their own security/release approvals. Coordinate with [source-org migration issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and the private [migration draft #25](https://github.com/ores-truffle-oreslang/.github/pull/25). Before an authorized transfer: record exact head SHA and Git tree, numeric ID, permissions/visibility, branch rulesets, reviewers, open PRs, dependencies, package identifiers, release tags, secrets, webhooks, GitHub Apps, CI and rollback owner; require source/target admin plus independent security review. Never mirror private code to bypass transfer authorization. After moving, verify repository ID/history and controls, fix consumers and rerun **nonzero-step exact-head tests**. `steps=[]`/`null` is `NOT_EXECUTED`; host-only/static tests do not certify compiled AttoLang guest behavior.
+Before an authorized transfer, coordinate in [migration issue #26](https://github.com/ores-truffle-oreslang/.github/issues/26) and review the authorized runbook. Record source/target administrators, numeric ID, exact SHA/tree, history, visibility, access, rulesets, open PRs/issues, releases, packages, consumers, CI/billing/runners, secrets, deploy keys, apps, webhooks, Pages and rollback ownership. Verify unchanged ID/history/tree and restored controls afterward; execute exact-head tests before changing consumers. Zero-step jobs are NOT_EXECUTED; host-only and source-free checks do not certify compiled guest execution or production capabilities.
