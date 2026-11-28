@@ -1,3 +1,5 @@
+mod borrow_check;
+
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use oreslang_compiler_client::{CompilerClient, CompilerCommand};
 use oreslang_protocol::{CheckReport, Diagnostic, DiagnosticSeverity, DIAGNOSTIC_PROTOCOL_VERSION};
@@ -21,6 +23,8 @@ struct Cli {
 enum Command {
     /// Parse, resolve, and type-check AttoLang without executing guest code.
     Check(CheckArgs),
+    /// Independently verify compiler-exported typed borrow CFG with the canonical Rust oracle.
+    BorrowCheck(borrow_check::BorrowCheckArgs),
     /// Execute an AttoLang program with explicit host-I/O permissions.
     Run(RunArgs),
     /// Execute native AttoLang test suites with race or fuzz orchestration.
@@ -466,6 +470,7 @@ fn parse_cli() -> Cli {
 fn main() -> ExitCode {
     match parse_cli().command {
         Command::Check(args) => check(args),
+        Command::BorrowCheck(args) => borrow_check::run(args),
         Command::Run(args) => run(args),
         Command::Test(args) => test(args),
         Command::Lsp(args) => lsp(args),
@@ -637,6 +642,10 @@ fn doctor(args: DoctorArgs) -> ExitCode {
     println!("compiler backend: {}", command.display());
     println!("public editor command: atto check <file.atto> (legacy: oreslang check <file.ores>)");
     println!("runtime command: atto run <file.atto> (legacy: oreslang run <file.ores>)");
+    println!("deep borrow diagnostic: atto borrow-check <file.atto>");
+    println!(
+        "deep borrow status: experimental; requires external exporter and canonical Rust checker"
+    );
     println!("language server: atto lsp --stdio (legacy: oreslang lsp --stdio)");
     println!("permissions: Deno-style --allow-*/--deny-*; runtime enforcement is always active");
     println!("build profiles: --release | --strict-aot | --hard-rt; --freestanding is orthogonal");
